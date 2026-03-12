@@ -26,43 +26,53 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
     async function loadPdf() {
       try {
-        // Dynamic import — PDF.js must be client-side only
         const pdfjsLib = await import('pdfjs-dist')
         pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`
 
         const pdf = await pdfjsLib.getDocument(pdfUrl).promise
         if (cancelled) return
 
-
         const container = containerRef.current
         if (!container) return
 
         container.innerHTML = ''
 
+        // Compute scale to fit container width (max 1.5x)
+        // Avoids PDF overflowing its container and causing layout mismatches
+        const containerWidth = container.clientWidth - 32 // minus px-4 padding on both sides
+        const firstPage = await pdf.getPage(1)
+        const naturalVp = firstPage.getViewport({ scale: 1.0 })
+        const scale = Math.min(1.5, containerWidth > 0 ? containerWidth / naturalVp.width : 1.5)
+
+        // Device pixel ratio — doubles canvas resolution on Retina displays
+        const dpr = window.devicePixelRatio || 1
+
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
           const page = await pdf.getPage(pageNum)
           if (cancelled) return
 
-          const viewport = page.getViewport({ scale: 1.5 })
+          // Viewport in CSS pixels
+          const viewport = page.getViewport({ scale })
 
-          // Page wrapper
+          // Page wrapper — sized in CSS pixels
           const pageWrapper = document.createElement('div')
           pageWrapper.className = 'pdf-page'
           pageWrapper.dataset.page = String(pageNum)
-          pageWrapper.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;`
+          pageWrapper.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;overflow:hidden;`
 
-          // Canvas
+          // Canvas — internal resolution scaled by DPR for crisp Retina rendering
+          // CSS size matches viewport (CSS pixels); canvas pixels = viewport * dpr
           const canvas = document.createElement('canvas')
-          canvas.width = viewport.width
-          canvas.height = viewport.height
-          // pointer-events:none lets mouse events pass through to the text layer above
-          canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:1;'
+          canvas.width = Math.round(viewport.width * dpr)
+          canvas.height = Math.round(viewport.height * dpr)
+          canvas.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;pointer-events:none;z-index:1;`
 
           const ctx = canvas.getContext('2d')!
+          ctx.scale(dpr, dpr) // scale context to match DPR before rendering
           await page.render({ canvasContext: ctx, viewport }).promise
           if (cancelled) return
 
-          // Text layer for selection
+          // Text layer — same CSS pixel dimensions as canvas so spans align exactly
           const textLayerDiv = document.createElement('div')
           textLayerDiv.className = 'textLayer'
           textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;z-index:2;`
@@ -99,10 +109,10 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
   useEffect(() => {
     if (!loaded) return
 
-    // PM-015 fix: collect all spans that visually overlap with the selection rect
-    // and join them in reading order. sel.toString() follows DOM order which can
-    // be out of sync with visual order in PDF.js text layers, producing truncated
-    // or garbled text (e.g. "mobile-first fina" instead of "mobile-first financial").
+    // PM-015: collect all spans that visually overlap the selection rect and join
+    // them in reading order. sel.toString() follows DOM order which doesn't match
+    // visual order in PDF.js text layers — words split across spans produce
+    // truncated text like "mobile-first fina" instead of "mobile-first financial".
     function captureCleanText(sel: Selection, pageEl: HTMLElement): string {
       if (sel.rangeCount === 0) return sel.toString().trim()
       const selRect = sel.getRangeAt(0).getBoundingClientRect()
@@ -116,28 +126,28 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
         if (!text.trim()) continue
         const r = span.getBoundingClientRect()
         if (r.width === 0) continue
-        // Include span if it intersects the selection rect (2px tolerance)
-        const overlaps = !(r.right < selRect.left - 2 || r.left > selRect.right + 2 ||
-                           r.bottom < selRect.top - 2 || r.top > selRect.bottom + 2)
+        // Span overlaps selection rect (4px tolerance accounts for scaleX rounding)
+        const overlaps = !(r.right < selRect.left - 4 || r.left > selRect.right + 4 ||
+                           r.bottom < selRect.top - 4 || r.top > selRect.bottom + 4)
         if (overlaps) collected.push({ text, rect: r })
       }
 
       if (collected.length === 0) return sel.toString().trim()
 
-      // Sort by reading order: top-to-bottom, left-to-right
+      // Sort by reading order: top-to-bottom, then left-to-right within each row
       collected.sort((a, b) => {
         const rowDiff = Math.round(a.rect.top) - Math.round(b.rect.top)
-        if (Math.abs(rowDiff) > 3) return rowDiff
+        if (Math.abs(rowDiff) > 5) return rowDiff
         return a.rect.left - b.rect.left
       })
 
-      // Join, inserting a space wherever there is a visible gap between spans
+      // Join spans, adding a space wherever there is a visible gap between them
       let result = ''
       let prev: DOMRect | null = null
       for (const { text, rect } of collected) {
         if (result && prev) {
-          const sameRow = Math.abs(rect.top - prev.top) <= 3
-          if (!sameRow || rect.left - prev.right > 0) result += ' '
+          const sameRow = Math.abs(rect.top - prev.top) <= 5
+          if (!sameRow || rect.left - prev.right > 1) result += ' '
         }
         result += text
         prev = rect
@@ -153,7 +163,6 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const container = containerRef.current
       if (!container) return
 
-      // Find which page the selection is on
       let pageEl: HTMLElement | null = null
       let node: Node | null = range.commonAncestorContainer
       while (node && node !== container) {
@@ -219,13 +228,20 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
         .textLayer span {
           color: transparent;
           position: absolute;
+          white-space: pre;
           cursor: text;
           user-select: text;
           -webkit-user-select: text;
           pointer-events: auto;
-          white-space: pre;
+          /* Critical: PDF.js scaleX transforms must originate from the left edge.
+             Default transform-origin is 50% 50% (center), which shifts spans
+             horizontally and misaligns them with the canvas-rendered text. */
+          transform-origin: 0% 0%;
         }
-        .textLayer ::selection { background: rgba(99,102,241,0.3); color: transparent; }
+        .textLayer ::selection {
+          background: rgba(99, 102, 241, 0.3);
+          color: transparent;
+        }
       `}</style>
     </div>
   )
