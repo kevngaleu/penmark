@@ -7,12 +7,7 @@
   --foreground: #171717;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* App is light-mode only — dark mode variables intentionally removed */
 
 body {
   color: var(--foreground);

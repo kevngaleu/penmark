@@ -55,8 +55,9 @@ export default function DashboardPage() {
 
       if (!resumeData) {
         // Check for pending upload from before magic link click
-        const pending = sessionStorage.getItem('pendingUpload')
-        const pendingFileData = sessionStorage.getItem('pendingFile')
+        // localStorage persists across tabs — magic link opens in a new tab
+        const pending = localStorage.getItem('pendingUpload')
+        const pendingFileData = localStorage.getItem('pendingFile')
 
         if (pending && pendingFileData) {
           // Convert base64 back to File and upload
@@ -75,8 +76,8 @@ export default function DashboardPage() {
               pdf_url: storagePath, label: 'Version 1 — original',
             })
           }
-          sessionStorage.removeItem('pendingUpload')
-          sessionStorage.removeItem('pendingFile')
+          localStorage.removeItem('pendingUpload')
+          localStorage.removeItem('pendingFile')
           window.location.reload()
           return
         }

@@ -9,6 +9,10 @@ export async function GET(request: Request) {
 
   if (code) {
     const cookieStore = cookies()
+
+    // Collect cookies to set so we can attach them to the redirect response
+    const newCookies: Array<{ name: string; value: string; options: Record<string, unknown> }> = []
+
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -16,16 +20,23 @@ export async function GET(request: Request) {
         cookies: {
           getAll() { return cookieStore.getAll() },
           setAll(cookiesToSet) {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
+            // Capture the cookies — we'll set them on the redirect response below
+            cookiesToSet.forEach(c => newCookies.push(c))
           },
         },
       }
     )
+
     const { error } = await supabase.auth.exchangeCodeForSession(code)
+
     if (!error) {
-      return NextResponse.redirect(`${origin}${next}`)
+      // Build the redirect response and attach the session cookies to it
+      const response = NextResponse.redirect(`${origin}${next}`)
+      newCookies.forEach(({ name, value, options }) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        response.cookies.set(name, value, options as any)
+      })
+      return response
     }
   }
 

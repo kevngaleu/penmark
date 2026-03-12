@@ -51,12 +51,13 @@ export default function UploadPage() {
       const slug = generateSlug(name, role)
 
       // Store pending upload info for post-auth pickup on dashboard
-      sessionStorage.setItem('pendingUpload', JSON.stringify({ slug, fileName: file.name }))
+      // localStorage persists across tabs — needed because magic link opens in a new tab
+      localStorage.setItem('pendingUpload', JSON.stringify({ slug, fileName: file.name }))
 
       // Store file as base64 for post-auth upload
       const reader = new FileReader()
       reader.onload = () => {
-        try { sessionStorage.setItem('pendingFile', reader.result as string) } catch { /* quota */ }
+        try { localStorage.setItem('pendingFile', reader.result as string) } catch { /* quota */ }
       }
       reader.readAsDataURL(file)
 
