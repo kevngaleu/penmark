@@ -55,7 +55,8 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           const canvas = document.createElement('canvas')
           canvas.width = viewport.width
           canvas.height = viewport.height
-          canvas.style.cssText = 'position:absolute;top:0;left:0;'
+          // pointer-events:none lets mouse events pass through to the text layer above
+          canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:none;z-index:1;'
 
           const ctx = canvas.getContext('2d')!
           await page.render({ canvasContext: ctx, viewport }).promise
@@ -64,7 +65,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           // Text layer for selection
           const textLayerDiv = document.createElement('div')
           textLayerDiv.className = 'textLayer'
-          textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;`
+          textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;z-index:2;`
 
           const textContent = await page.getTextContent()
           if (cancelled) return
@@ -169,8 +170,16 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
       <style>{`
         .textLayer { opacity: 1; }
-        .textLayer span { color: transparent; position: absolute; cursor: text; }
-        .textLayer ::selection { background: rgba(99,102,241,0.3); }
+        .textLayer span {
+          color: transparent;
+          position: absolute;
+          cursor: text;
+          user-select: text;
+          -webkit-user-select: text;
+          pointer-events: auto;
+          white-space: pre;
+        }
+        .textLayer ::selection { background: rgba(99,102,241,0.3); color: transparent; }
       `}</style>
     </div>
   )
