@@ -99,6 +99,52 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
   useEffect(() => {
     if (!loaded) return
 
+    // PM-015 fix: collect all spans that visually overlap with the selection rect
+    // and join them in reading order. sel.toString() follows DOM order which can
+    // be out of sync with visual order in PDF.js text layers, producing truncated
+    // or garbled text (e.g. "mobile-first fina" instead of "mobile-first financial").
+    function captureCleanText(sel: Selection, pageEl: HTMLElement): string {
+      if (sel.rangeCount === 0) return sel.toString().trim()
+      const selRect = sel.getRangeAt(0).getBoundingClientRect()
+      if (selRect.width === 0 && selRect.height === 0) return sel.toString().trim()
+
+      const spans = Array.from(pageEl.querySelectorAll('.textLayer span'))
+      const collected: { text: string; rect: DOMRect }[] = []
+
+      for (const span of spans) {
+        const text = span.textContent || ''
+        if (!text.trim()) continue
+        const r = span.getBoundingClientRect()
+        if (r.width === 0) continue
+        // Include span if it intersects the selection rect (2px tolerance)
+        const overlaps = !(r.right < selRect.left - 2 || r.left > selRect.right + 2 ||
+                           r.bottom < selRect.top - 2 || r.top > selRect.bottom + 2)
+        if (overlaps) collected.push({ text, rect: r })
+      }
+
+      if (collected.length === 0) return sel.toString().trim()
+
+      // Sort by reading order: top-to-bottom, left-to-right
+      collected.sort((a, b) => {
+        const rowDiff = Math.round(a.rect.top) - Math.round(b.rect.top)
+        if (Math.abs(rowDiff) > 3) return rowDiff
+        return a.rect.left - b.rect.left
+      })
+
+      // Join, inserting a space wherever there is a visible gap between spans
+      let result = ''
+      let prev: DOMRect | null = null
+      for (const { text, rect } of collected) {
+        if (result && prev) {
+          const sameRow = Math.abs(rect.top - prev.top) <= 3
+          if (!sameRow || rect.left - prev.right > 0) result += ' '
+        }
+        result += text
+        prev = rect
+      }
+      return result.replace(/\s+/g, ' ').trim()
+    }
+
     function handleMouseUp() {
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || !sel.toString().trim()) return
@@ -127,7 +173,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width) * 100
 
       onSelection({
-        text: sel.toString().trim(),
+        text: captureCleanText(sel, pageEl),
         page: pageNum,
         topPct: Math.max(0, Math.min(100, topPct)),
         leftPct: Math.max(0, Math.min(100, leftPct)),
