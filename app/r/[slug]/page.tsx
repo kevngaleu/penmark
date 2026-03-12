@@ -54,12 +54,12 @@ export default function ReviewPage() {
         return
       }
 
-      // Get signed URL for PDF (private bucket)
-      const { data: signedData } = await supabase.storage
-        .from('resumes')
-        .createSignedUrl(resumeData.current_pdf_url, 3600)
-
-      if (signedData?.signedUrl) setPdfUrl(signedData.signedUrl)
+      // Get signed URL via server API — anon client cannot access private storage directly
+      const urlRes = await fetch(`/api/pdf-url?slug=${slug}`)
+      if (urlRes.ok) {
+        const { url } = await urlRes.json()
+        setPdfUrl(url)
+      }
 
       // Update last_active_at
       await supabase
