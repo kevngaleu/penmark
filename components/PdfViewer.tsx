@@ -28,9 +28,10 @@ interface PdfTextItem {
 }
 
 /**
- * A merged group of adjacent zero-gap text items that will become one <span>.
- * Pre-merging eliminates split-word boundaries so sel.toString() always
- * returns complete words without any post-processing.
+ * A merged group representing one full text line that will become one <span>.
+ * Pre-merging joins all items on the same baseline into a single span with
+ * spaces inserted at word boundaries, so sel.toString() always returns
+ * properly spaced text without any post-processing.
  */
 interface MergedTextItem {
   str: string
@@ -126,15 +127,22 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
             })
           }
 
-          // ── Step 2: Pre-merge adjacent zero-gap items ──────────────────
+          // ── Step 2: Pre-merge items into full lines ───────────────────
           // PDF text items frequently split words at arbitrary positions
-          // (e.g. "roa" + "dmap" for "roadmap"). We detect these splits by
-          // checking whether adjacent items are:
-          //   a) on the same baseline (|baselineY difference| < 0.5 PDF units)
-          //   b) zero-gap (rightEdge of item[n] within 0.5 PDF units of
-          //      leftEdge of item[n+1])
-          // Merged items become one <span> so sel.toString() always returns
-          // complete words with no post-processing needed.
+          // (e.g. "roa" + "dmap" for "roadmap") and use positioning rather
+          // than space characters for word spacing. We merge an entire
+          // text line into one <span> so that sel.toString() returns text
+          // with proper spaces between words.
+          //
+          // Merge rules for adjacent items:
+          //   - Same baseline (|dy| < 0.5) AND gap < 0.5  → concatenate
+          //     directly (split-word fragment, e.g. "roa"+"dmap")
+          //   - Same baseline (|dy| < 0.5) AND gap >= 0.5 → insert a
+          //     space character then continue merging (word boundary)
+          //   - Different baseline (|dy| >= 0.5) → break (line boundary)
+          //
+          // Result: each merged item is one full line with spaces between
+          // words, so the browser selection always includes proper spacing.
           const merged: MergedTextItem[] = []
 
           for (let i = 0; i < items.length; i++) {
@@ -149,23 +157,30 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
             let groupWidth = item.width
             let groupRightEdge = pdfX + item.width
 
-            // Try to merge subsequent items into this group
+            // Try to merge subsequent items on the same line
             while (i + 1 < items.length) {
               const next = items[i + 1]
               const nextPdfX = next.transform[4]
               const nextPdfY = next.transform[5]
 
-              // Same baseline? (within 0.5 PDF user units)
+              // Different baseline → line boundary → break
               const baselineDiff = Math.abs(pdfY - nextPdfY)
               if (baselineDiff >= 0.5) break
 
-              // Zero gap? (right edge of current group within 0.5 PDF units of next left edge)
               const gap = nextPdfX - groupRightEdge
-              if (gap >= 0.5 || gap < -0.5) break
+
+              // Large negative gap (overlap / rewind) → likely a new column or segment
+              if (gap < -0.5) break
+
+              if (gap >= 0.5) {
+                // Word boundary on same line: insert a space and continue merging
+                groupStr += ' '
+              }
+              // else: gap < 0.5 → split-word fragment, concatenate directly
 
               // Merge: append text, extend width, advance pointer
               groupStr += next.str
-              groupWidth += next.width
+              groupWidth += (nextPdfX - pdfX) + next.width // total span from group start to end of next item
               groupRightEdge = nextPdfX + next.width
               i++ // consume the next item
             }
@@ -174,7 +189,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
               str: groupStr,
               pdfX,
               pdfY,
-              totalWidth: groupWidth,
+              totalWidth: groupRightEdge - pdfX,
               height: item.height,
               fontSizePdf,
             })
@@ -235,8 +250,9 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
   }, [pdfUrl])
 
   // -- Selection handler --------------------------------------------------
-  // Because we pre-merged zero-gap text items, sel.toString() always returns
-  // complete words. No post-processing word-completion loop is needed.
+  // Because we pre-merged entire text lines (with spaces at word boundaries),
+  // sel.toString() always returns properly spaced text. No post-processing
+  // word-completion loop is needed.
   useEffect(() => {
     if (!loaded) return
 

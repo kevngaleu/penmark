@@ -104,9 +104,6 @@ export default function ReviewPage() {
     const newCount = commentCount + 1
     setCommentCount(newCount)
 
-    // Show post-review overlay after first comment
-    if (newCount === 1) setShowOverlay(true)
-
     // Show reviewer nudge after first comment
     if (newCount === 1) {
       setTimeout(() => {
@@ -163,6 +160,12 @@ export default function ReviewPage() {
             className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-colors"
           >
             + General feedback
+          </button>
+          <button
+            onClick={() => setShowOverlay(true)}
+            className="border border-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-full hover:border-green-500 hover:text-green-600 transition-colors"
+          >
+            ✓ Done
           </button>
         </div>
       </div>
