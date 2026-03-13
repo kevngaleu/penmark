@@ -7,7 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import FeedbackCard from '@/components/FeedbackCard'
 import PaywallModal from '@/components/PaywallModal'
 import ArchiveModal from '@/components/ArchiveModal'
-import { FREE_VERSION_LIMIT } from '@/lib/constants'
+import { FREE_COMMENT_LIMIT } from '@/lib/constants'
 import type { Resume, Comment, ResumeVersion } from '@/types'
 
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), { ssr: false })
@@ -122,12 +122,7 @@ export default function DashboardPage() {
 
   function interceptReupload(file: File) {
     if (!resume) return
-    if (!resume.is_paid && versions.length >= FREE_VERSION_LIMIT) {
-      setPendingFile(file)
-      setShowPaywall(true)
-      return
-    }
-
+    // Uploads are always free — the paywall gates comment visibility, not versions
     const anchoredCount = comments.filter(c => !c.is_general && c.archived_at_version === null).length
     if (anchoredCount > 0) {
       setPendingFile(file)
@@ -207,20 +202,17 @@ export default function DashboardPage() {
     showToast('Link copied!')
   }
 
-  function unlock() {
+  async function unlock() {
     // V1: manual unlock — Stripe integration in V2
+    if (!resume) return
+    const supabase = createClient()
+    await supabase
+      .from('resumes')
+      .update({ is_paid: true })
+      .eq('id', resume.id)
+    setResume({ ...resume, is_paid: true })
     setShowPaywall(false)
-    if (resume) setResume({ ...resume, is_paid: true })
-    showToast('🎉 Unlimited revisions unlocked — welcome to Penmark!')
-    const f = pendingFile
-    if (f) {
-      const anchoredCount = comments.filter(c => !c.is_general && c.archived_at_version === null).length
-      if (anchoredCount > 0) {
-        setShowArchive(true)
-      } else {
-        confirmReupload(f)
-      }
-    }
+    showToast('🔓 All feedback unlocked!')
   }
 
   if (loading) {
@@ -245,6 +237,11 @@ export default function DashboardPage() {
 
   const uniqueReviewers = new Set(comments.map(c => c.reviewer_name || 'anonymous')).size
   const pagesWithFeedback = new Set(currentComments.map(c => c.page_number)).size
+
+  // Comment visibility gate: first FREE_COMMENT_LIMIT comments are visible; rest are blurred unless paid
+  const allVisible = comments.filter(c => c.archived_at_version === null)
+  const isPaid = resume.is_paid
+  const blurredCount = isPaid ? 0 : Math.max(0, allVisible.length - FREE_COMMENT_LIMIT)
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -379,9 +376,13 @@ export default function DashboardPage() {
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">
                     Current feedback — {currentComments.length}
                   </h3>
-                  {currentComments.map((c, i) => (
-                    <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} />
-                  ))}
+                  {currentComments.map((c, i) => {
+                    const visibleIndex = allVisible.indexOf(c)
+                    const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                    return (
+                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} blurred={isBlurred} />
+                    )
+                  })}
                 </>
               )}
 
@@ -401,14 +402,37 @@ export default function DashboardPage() {
                   <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 mt-4 mb-2">
                     General feedback — {generalComments.length}
                   </h3>
-                  {generalComments.map(c => (
-                    <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} />
-                  ))}
+                  {generalComments.map(c => {
+                    const visibleIndex = allVisible.indexOf(c)
+                    const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                    return (
+                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} blurred={isBlurred} />
+                    )
+                  })}
                 </>
               )}
             </>
           )}
         </div>
+
+        {/* Unlock CTA — shown when blurred comments exist */}
+        {blurredCount > 0 && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 text-center">
+            <div className="text-2xl mb-2">🔒</div>
+            <p className="text-sm font-semibold text-gray-900 mb-1">
+              {blurredCount} more comment{blurredCount !== 1 ? 's' : ''} from your reviewers
+            </p>
+            <p className="text-xs text-gray-500 mb-4">
+              Your reviewers took time to help — unlock all their feedback.
+            </p>
+            <button
+              onClick={() => setShowPaywall(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl px-6 py-3 transition-colors"
+            >
+              Unlock all feedback — $9
+            </button>
+          </div>
+        )}
 
         {/* "I got the job" banner */}
         {!resume.hired_at && comments.length >= 3 && (

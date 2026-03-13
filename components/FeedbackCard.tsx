@@ -7,11 +7,12 @@ interface FeedbackCardProps {
   comment: Comment
   num?: number | null
   onDelete?: (id: string) => void
+  blurred?: boolean
 }
 
-export default function FeedbackCard({ comment, num, onDelete }: FeedbackCardProps) {
+export default function FeedbackCard({ comment, num, onDelete, blurred }: FeedbackCardProps) {
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+    <div className={`bg-white border border-gray-100 rounded-xl p-4 shadow-sm ${blurred ? 'relative overflow-hidden' : ''}`}>
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           {num != null && (
@@ -19,7 +20,7 @@ export default function FeedbackCard({ comment, num, onDelete }: FeedbackCardPro
               {num}
             </span>
           )}
-          <span className="text-sm font-medium text-gray-700">
+          <span className={`text-sm font-medium text-gray-700 ${blurred ? 'blur-sm select-none' : ''}`}>
             {comment.reviewer_name || 'Anonymous'}
           </span>
           {comment.is_general && (
@@ -33,7 +34,7 @@ export default function FeedbackCard({ comment, num, onDelete }: FeedbackCardPro
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs text-gray-400">{fmt(comment.created_at)}</span>
-          {onDelete && (
+          {onDelete && !blurred && (
             <button
               onClick={() => onDelete(comment.id)}
               className="text-gray-300 hover:text-red-400 text-xs transition-colors"
@@ -46,12 +47,12 @@ export default function FeedbackCard({ comment, num, onDelete }: FeedbackCardPro
       </div>
 
       {comment.selected_text && (
-        <div className="bg-yellow-50 border-l-4 border-yellow-300 px-3 py-1.5 rounded-r text-xs text-gray-500 italic mb-2 line-clamp-2">
+        <div className={`bg-yellow-50 border-l-4 border-yellow-300 px-3 py-1.5 rounded-r text-xs text-gray-500 italic mb-2 line-clamp-2 ${blurred ? 'blur-sm select-none' : ''}`}>
           &ldquo;{comment.selected_text}&rdquo;
         </div>
       )}
 
-      <p className="text-sm text-gray-700 leading-relaxed">{comment.body}</p>
+      <p className={`text-sm text-gray-700 leading-relaxed ${blurred ? 'blur-sm select-none' : ''}`}>{comment.body}</p>
     </div>
   )
 }
