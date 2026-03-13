@@ -38,8 +38,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
         container.innerHTML = ''
 
         // Compute scale to fit container width (max 1.5x)
-        // Avoids PDF overflowing its container and causing layout mismatches
-        const containerWidth = container.clientWidth - 32 // minus px-4 padding on both sides
+        const containerWidth = container.clientWidth - 32
         const firstPage = await pdf.getPage(1)
         const naturalVp = firstPage.getViewport({ scale: 1.0 })
         const scale = Math.min(1.5, containerWidth > 0 ? containerWidth / naturalVp.width : 1.5)
@@ -51,31 +50,29 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           const page = await pdf.getPage(pageNum)
           if (cancelled) return
 
-          // Viewport in CSS pixels
           const viewport = page.getViewport({ scale })
 
-          // Page wrapper — sized in CSS pixels
+          // Page wrapper
           const pageWrapper = document.createElement('div')
           pageWrapper.className = 'pdf-page'
           pageWrapper.dataset.page = String(pageNum)
           pageWrapper.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;overflow:hidden;`
 
-          // Canvas — internal resolution scaled by DPR for crisp Retina rendering
-          // CSS size matches viewport (CSS pixels); canvas pixels = viewport * dpr
+          // Canvas with DPR correction for crisp Retina rendering
           const canvas = document.createElement('canvas')
           canvas.width = Math.round(viewport.width * dpr)
           canvas.height = Math.round(viewport.height * dpr)
           canvas.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;pointer-events:none;z-index:1;`
 
           const ctx = canvas.getContext('2d')!
-          ctx.scale(dpr, dpr) // scale context to match DPR before rendering
+          ctx.scale(dpr, dpr)
           await page.render({ canvasContext: ctx, viewport }).promise
           if (cancelled) return
 
-          // Text layer — same CSS pixel dimensions as canvas so spans align exactly
+          // Text layer — same CSS pixel dimensions as canvas
           const textLayerDiv = document.createElement('div')
           textLayerDiv.className = 'textLayer'
-          textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;z-index:2;`
+          textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;z-index:2;user-select:text;-webkit-user-select:text;`
 
           const textContent = await page.getTextContent()
           if (cancelled) return
@@ -88,6 +85,21 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           })
           await rtl.promise
           if (cancelled) return
+
+          // CRITICAL: set transform-origin and cursor as INLINE styles after renderTextLayer.
+          // CSS rules can be overridden or mis-ordered; inline styles win unconditionally.
+          // PDF.js applies scaleX(n) starting from the left edge — origin must be 0% 0%
+          // or every span shifts horizontally, misaligning cursor hit areas from canvas text.
+          textLayerDiv.querySelectorAll('span').forEach((el) => {
+            const s = (el as HTMLElement).style
+            s.transformOrigin = '0% 0%'
+            s.cursor = 'text'
+            s.pointerEvents = 'auto'
+            s.userSelect = 'text'
+            s.setProperty('-webkit-user-select', 'text')
+            // Ensure color is transparent — some PDF.js builds set their own color
+            s.color = 'transparent'
+          })
 
           pageWrapper.appendChild(canvas)
           pageWrapper.appendChild(textLayerDiv)
@@ -109,14 +121,17 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
   useEffect(() => {
     if (!loaded) return
 
-    // PM-015: collect all spans that visually overlap the selection rect and join
-    // them in reading order. sel.toString() follows DOM order which doesn't match
-    // visual order in PDF.js text layers — words split across spans produce
-    // truncated text like "mobile-first fina" instead of "mobile-first financial".
+    // PM-015: collect spans that overlap the selection, sort by reading order, join.
+    //
+    // Key improvement: use range.getClientRects() (per-line rects) instead of
+    // getBoundingClientRect() (a single union rect). The union rect for a
+    // multi-line selection can span several lines, accidentally pulling in spans
+    // the user never touched. Per-line rects are tight and accurate.
     function captureCleanText(sel: Selection, pageEl: HTMLElement): string {
       if (sel.rangeCount === 0) return sel.toString().trim()
-      const selRect = sel.getRangeAt(0).getBoundingClientRect()
-      if (selRect.width === 0 && selRect.height === 0) return sel.toString().trim()
+      const range = sel.getRangeAt(0)
+      const selRects = Array.from(range.getClientRects())
+      if (selRects.length === 0) return sel.toString().trim()
 
       const spans = Array.from(pageEl.querySelectorAll('.textLayer span'))
       const collected: { text: string; rect: DOMRect }[] = []
@@ -126,22 +141,25 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
         if (!text.trim()) continue
         const r = span.getBoundingClientRect()
         if (r.width === 0) continue
-        // Span overlaps selection rect (4px tolerance accounts for scaleX rounding)
-        const overlaps = !(r.right < selRect.left - 4 || r.left > selRect.right + 4 ||
-                           r.bottom < selRect.top - 4 || r.top > selRect.bottom + 4)
+
+        // Span must overlap at least one of the selection's per-line rects
+        const overlaps = selRects.some(sr =>
+          !(r.right < sr.left - 4 || r.left > sr.right + 4 ||
+            r.bottom < sr.top - 4 || r.top > sr.bottom + 4)
+        )
         if (overlaps) collected.push({ text, rect: r })
       }
 
       if (collected.length === 0) return sel.toString().trim()
 
-      // Sort by reading order: top-to-bottom, then left-to-right within each row
+      // Sort reading order: top-to-bottom, then left-to-right within each row
       collected.sort((a, b) => {
         const rowDiff = Math.round(a.rect.top) - Math.round(b.rect.top)
         if (Math.abs(rowDiff) > 5) return rowDiff
         return a.rect.left - b.rect.left
       })
 
-      // Join spans, adding a space wherever there is a visible gap between them
+      // Join spans; add space at row breaks or visible horizontal gaps
       let result = ''
       let prev: DOMRect | null = null
       for (const { text, rect } of collected) {
@@ -233,9 +251,6 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           user-select: text;
           -webkit-user-select: text;
           pointer-events: auto;
-          /* Critical: PDF.js scaleX transforms must originate from the left edge.
-             Default transform-origin is 50% 50% (center), which shifts spans
-             horizontally and misaligns them with the canvas-rendered text. */
           transform-origin: 0% 0%;
         }
         .textLayer ::selection {
