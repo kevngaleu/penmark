@@ -174,11 +174,30 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
-      // Our custom overlay creates spans in PDF content-stream order, which for
-      // standard resumes matches visual reading order. sel.toString() therefore
-      // returns the selected text correctly without any span-rect arithmetic.
+      // PDF text items can split words at arbitrary positions (e.g. "roa" + "dmap"
+      // for "roadmap"). If the selection ends just before a continuation fragment,
+      // sel.toString() returns only the partial word. Walk forward through sibling
+      // spans and append any that continue without a whitespace gap.
+      let text = sel.toString()
+      if (text && !/\s$/.test(text)) {
+        const endNode = range.endContainer
+        const endSpan = endNode.nodeType === Node.TEXT_NODE
+          ? endNode.parentElement
+          : (endNode instanceof HTMLElement ? endNode : null)
+        if (endSpan?.tagName === 'SPAN') {
+          let next = endSpan.nextElementSibling as HTMLElement | null
+          while (next?.tagName === 'SPAN') {
+            const nc = next.textContent ?? ''
+            if (!nc || /^\s/.test(nc)) break   // space gap = word boundary, stop
+            text += nc
+            if (/\s/.test(nc[nc.length - 1])) break  // appended chunk ends word
+            next = next.nextElementSibling as HTMLElement | null
+          }
+        }
+      }
+
       onSelection({
-        text:    sel.toString().replace(/\s+/g, ' ').trim(),
+        text:    text.replace(/\s+/g, ' ').trim(),
         page:    pageNum,
         topPct:  Math.max(0, Math.min(100, topPct)),
         leftPct: Math.max(0, Math.min(100, leftPct)),
