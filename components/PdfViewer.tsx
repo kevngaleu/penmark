@@ -154,7 +154,6 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
             // Start a new group with the current item
             let groupStr = item.str
-            let groupWidth = item.width
             let groupRightEdge = pdfX + item.width
 
             // Try to merge subsequent items on the same line
@@ -180,7 +179,6 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
               // Merge: append text, extend width, advance pointer
               groupStr += next.str
-              groupWidth += (nextPdfX - pdfX) + next.width // total span from group start to end of next item
               groupRightEdge = nextPdfX + next.width
               i++ // consume the next item
             }
