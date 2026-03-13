@@ -16,6 +16,36 @@ interface PdfViewerProps {
   markers?: Array<{ id: string; page: number; topPct: number; leftPct: number; num?: number }>
 }
 
+/**
+ * Represents a single text item extracted from PDF.js getTextContent(),
+ * with the fields we use for positioning and merging.
+ */
+interface PdfTextItem {
+  str: string
+  transform: number[]
+  width: number
+  height: number
+}
+
+/**
+ * A merged group of adjacent zero-gap text items that will become one <span>.
+ * Pre-merging eliminates split-word boundaries so sel.toString() always
+ * returns complete words without any post-processing.
+ */
+interface MergedTextItem {
+  str: string
+  /** PDF x origin of the leftmost item (item.transform[4]) */
+  pdfX: number
+  /** PDF y origin / baseline (item.transform[5]) — same for all items in group */
+  pdfY: number
+  /** Total advance width in PDF user units */
+  totalWidth: number
+  /** Height in PDF user units (from the first item) */
+  height: number
+  /** Font size derived from the text matrix (from the first item) */
+  fontSizePdf: number
+}
+
 export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loaded, setLoaded] = useState(false)
@@ -37,7 +67,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
         container.innerHTML = ''
 
-        // Scale to fit container width, max 1.5×
+        // Scale to fit container width, max 1.5x
         const containerWidth = container.clientWidth - 32
         const firstPage = await pdf.getPage(1)
         const naturalVp = firstPage.getViewport({ scale: 1.0 })
@@ -50,13 +80,13 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
           const viewport = page.getViewport({ scale })
 
-          // ── Page wrapper ──────────────────────────────────────────────────
+          // -- Page wrapper ------------------------------------------------
           const pageWrapper = document.createElement('div')
           pageWrapper.className = 'pdf-page'
           pageWrapper.dataset.page = String(pageNum)
           pageWrapper.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;overflow:hidden;`
 
-          // ── Canvas (crisp DPR rendering) ──────────────────────────────────
+          // -- Canvas (crisp DPR rendering) --------------------------------
           const canvas = document.createElement('canvas')
           canvas.width = Math.round(viewport.width * dpr)
           canvas.height = Math.round(viewport.height * dpr)
@@ -66,15 +96,13 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           await page.render({ canvasContext: ctx, viewport }).promise
           if (cancelled) return
 
-          // ── Text overlay ──────────────────────────────────────────────────
+          // -- Text overlay ------------------------------------------------
           // We bypass renderTextLayer entirely and position every span ourselves
           // using the same viewport transform matrix that PDF.js uses for the canvas.
-          // This guarantees spans sit exactly over the canvas glyphs — no CSS
-          // transform-origin hacks, no dependency on renderTextLayer internals.
           //
           // viewport.transform = [a, b, c, d, e, f]
-          //   CSS x  =  a·pdfX  +  c·pdfY  +  e
-          //   CSS y  =  b·pdfX  +  d·pdfY  +  f
+          //   CSS x  =  a*pdfX  +  c*pdfY  +  e
+          //   CSS y  =  b*pdfX  +  d*pdfY  +  f
           // Standard upright page: [scale, 0, 0, -scale, 0, viewport.height]
           const [va, vb, vc, vd, ve, vf] = viewport.transform
 
@@ -85,41 +113,100 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           const textContent = await page.getTextContent()
           if (cancelled) return
 
+          // ── Step 1: Extract valid text items ────────────────────────────
+          const items: PdfTextItem[] = []
           for (const rawItem of textContent.items) {
-            // TextItem has {str, transform, width, height}; TextMarkedContent does not
             const item = rawItem as { str?: string; transform?: number[]; width?: number; height?: number }
             if (!item.str || !item.transform || !item.str.trim()) continue
+            items.push({
+              str: item.str,
+              transform: item.transform,
+              width: item.width ?? 0,
+              height: item.height ?? 0,
+            })
+          }
 
-            // item.transform = text matrix [ta, tb, tc, td, te, tf]
-            // (te, tf) = glyph origin (baseline, left edge) in PDF user space
-            const [ta, tb, , , te, tf] = item.transform
+          // ── Step 2: Pre-merge adjacent zero-gap items ──────────────────
+          // PDF text items frequently split words at arbitrary positions
+          // (e.g. "roa" + "dmap" for "roadmap"). We detect these splits by
+          // checking whether adjacent items are:
+          //   a) on the same baseline (|baselineY difference| < 0.5 PDF units)
+          //   b) zero-gap (rightEdge of item[n] within 0.5 PDF units of
+          //      leftEdge of item[n+1])
+          // Merged items become one <span> so sel.toString() always returns
+          // complete words with no post-processing needed.
+          const merged: MergedTextItem[] = []
 
-            // Convert origin to CSS viewport coordinates
-            const cssLeft     = va * te + vc * tf + ve
-            const cssBaseline = vb * te + vd * tf + vf
-
-            // Font size in PDF user units → CSS pixels
-            // For standard text matrix the first column magnitude is the font size
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i]
+            const pdfX = item.transform[4]
+            const pdfY = item.transform[5]
+            const [ta, tb] = item.transform
             const fontSizePdf = Math.sqrt(ta * ta + tb * tb)
-            const fontSizeCss = Math.max(fontSizePdf * viewport.scale, 1)
+
+            // Start a new group with the current item
+            let groupStr = item.str
+            let groupWidth = item.width
+            let groupRightEdge = pdfX + item.width
+
+            // Try to merge subsequent items into this group
+            while (i + 1 < items.length) {
+              const next = items[i + 1]
+              const nextPdfX = next.transform[4]
+              const nextPdfY = next.transform[5]
+
+              // Same baseline? (within 0.5 PDF user units)
+              const baselineDiff = Math.abs(pdfY - nextPdfY)
+              if (baselineDiff >= 0.5) break
+
+              // Zero gap? (right edge of current group within 0.5 PDF units of next left edge)
+              const gap = nextPdfX - groupRightEdge
+              if (gap >= 0.5 || gap < -0.5) break
+
+              // Merge: append text, extend width, advance pointer
+              groupStr += next.str
+              groupWidth += next.width
+              groupRightEdge = nextPdfX + next.width
+              i++ // consume the next item
+            }
+
+            merged.push({
+              str: groupStr,
+              pdfX,
+              pdfY,
+              totalWidth: groupWidth,
+              height: item.height,
+              fontSizePdf,
+            })
+          }
+
+          // ── Step 3: Create spans from merged items ─────────────────────
+          for (const m of merged) {
+            // Convert origin to CSS viewport coordinates
+            const cssLeft     = va * m.pdfX + vc * m.pdfY + ve
+            const cssBaseline = vb * m.pdfX + vd * m.pdfY + vf
+
+            // Font size in PDF user units -> CSS pixels
+            const fontSizeCss = Math.max(m.fontSizePdf * viewport.scale, 1)
 
             // Span dimensions in CSS pixels
-            const widthCss  = Math.max((item.width  ?? 0) * viewport.scale, 1)
-            const heightCss = item.height && item.height > 0
-              ? item.height * viewport.scale
+            const widthCss  = Math.max(m.totalWidth * viewport.scale, 1)
+            const heightCss = m.height > 0
+              ? m.height * viewport.scale
               : fontSizeCss
 
             // Top edge: baseline is at cssBaseline; text box extends upward by heightCss
             const topCss = cssBaseline - heightCss
 
             const span = document.createElement('span')
-            span.textContent = item.str
+            span.textContent = m.str
             span.style.cssText = [
               'position:absolute',
               `left:${cssLeft.toFixed(2)}px`,
               `top:${topCss.toFixed(2)}px`,
               `width:${widthCss.toFixed(2)}px`,
               `height:${heightCss.toFixed(2)}px`,
+              `font-size:${fontSizeCss.toFixed(2)}px`,
               'color:transparent',
               'white-space:pre',
               'cursor:text',
@@ -147,7 +234,9 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
     return () => { cancelled = true }
   }, [pdfUrl])
 
-  // ── Selection handler ───────────────────────────────────────────────────
+  // -- Selection handler --------------------------------------------------
+  // Because we pre-merged zero-gap text items, sel.toString() always returns
+  // complete words. No post-processing word-completion loop is needed.
   useEffect(() => {
     if (!loaded) return
 
@@ -159,6 +248,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const container = containerRef.current
       if (!container) return
 
+      // Walk up from the selection to find which page it belongs to
       let pageEl: HTMLElement | null = null
       let node: Node | null = range.commonAncestorContainer
       while (node && node !== container) {
@@ -174,41 +264,7 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
-      // PDF text items can split a word mid-character (e.g. "roa" + "dmap" for
-      // "roadmap"). If the selection ends just before a continuation fragment,
-      // sel.toString() returns only the partial word.
-      //
-      // Fix: check whether the next sibling span is a ZERO-GAP continuation —
-      // i.e. its CSS left equals the previous span's left+width (same PDF word).
-      // Spans from different words always have a positional gap > 1 CSS px.
-      // This is reliable even when the PDF encodes spacing via positioning rather
-      // than explicit space characters (which would break a whitespace-only check).
-      let text = sel.toString()
-      if (text && !/\s$/.test(text)) {
-        const endNode = range.endContainer
-        const endSpan = endNode.nodeType === Node.TEXT_NODE
-          ? endNode.parentElement
-          : (endNode instanceof HTMLElement ? endNode : null)
-        if (endSpan?.tagName === 'SPAN') {
-          let prevLeft  = parseFloat((endSpan as HTMLElement).style.left)  || 0
-          let prevWidth = parseFloat((endSpan as HTMLElement).style.width) || 0
-
-          let next = endSpan.nextElementSibling as HTMLElement | null
-          while (next?.tagName === 'SPAN') {
-            const nc = next.textContent ?? ''
-            if (!nc || /^\s/.test(nc)) break          // explicit space = word end
-
-            const nextLeft = parseFloat(next.style.left) || 0
-            if (nextLeft - (prevLeft + prevWidth) > 1) break  // positional gap = word spacing
-
-            text += nc
-            prevLeft  = nextLeft
-            prevWidth = parseFloat(next.style.width) || 0
-            if (/\s/.test(nc[nc.length - 1])) break  // appended chunk ends the word
-            next = next.nextElementSibling as HTMLElement | null
-          }
-        }
-      }
+      const text = sel.toString()
 
       onSelection({
         text:    text.replace(/\s+/g, ' ').trim(),
