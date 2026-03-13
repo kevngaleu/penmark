@@ -151,57 +151,6 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
   useEffect(() => {
     if (!loaded) return
 
-    // Collect every span whose bounding rect overlaps ANY of the selection's
-    // per-line rects, sort into reading order, join with spaces.
-    // Uses getClientRects() (one tight rect per line) rather than
-    // getBoundingClientRect() (one big union rect) to avoid pulling in spans
-    // from rows the user never touched.
-    function captureCleanText(sel: Selection, pageEl: HTMLElement): string {
-      if (sel.rangeCount === 0) return sel.toString().trim()
-      const range    = sel.getRangeAt(0)
-      const selRects = Array.from(range.getClientRects())
-      if (selRects.length === 0) return sel.toString().trim()
-
-      const spans = Array.from(pageEl.querySelectorAll('.textLayer span'))
-      const collected: { text: string; rect: DOMRect }[] = []
-
-      for (const span of spans) {
-        const text = span.textContent || ''
-        if (!text.trim()) continue
-        const r = span.getBoundingClientRect()
-        if (r.width === 0) continue
-
-        const overlaps = selRects.some(sr =>
-          !(r.right  < sr.left   - 4 ||
-            r.left   > sr.right  + 4 ||
-            r.bottom < sr.top    - 4 ||
-            r.top    > sr.bottom + 4)
-        )
-        if (overlaps) collected.push({ text, rect: r })
-      }
-
-      if (collected.length === 0) return sel.toString().trim()
-
-      // Reading order: top → bottom, then left → right within each row
-      collected.sort((a, b) => {
-        const rowDiff = Math.round(a.rect.top) - Math.round(b.rect.top)
-        if (Math.abs(rowDiff) > 5) return rowDiff
-        return a.rect.left - b.rect.left
-      })
-
-      let result = ''
-      let prev: DOMRect | null = null
-      for (const { text, rect } of collected) {
-        if (result && prev) {
-          const sameRow = Math.abs(rect.top - prev.top) <= 5
-          if (!sameRow || rect.left - prev.right > 1) result += ' '
-        }
-        result += text
-        prev = rect
-      }
-      return result.replace(/\s+/g, ' ').trim()
-    }
-
     function handleMouseUp() {
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || !sel.toString().trim()) return
@@ -218,15 +167,18 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       }
       if (!pageEl) return
 
-      const pageNum  = parseInt(pageEl.dataset.page!)
-      const pageRect = pageEl.getBoundingClientRect()
+      const pageNum   = parseInt(pageEl.dataset.page!)
+      const pageRect  = pageEl.getBoundingClientRect()
       const rangeRect = range.getBoundingClientRect()
 
       const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
+      // Our custom overlay creates spans in PDF content-stream order, which for
+      // standard resumes matches visual reading order. sel.toString() therefore
+      // returns the selected text correctly without any span-rect arithmetic.
       onSelection({
-        text:    captureCleanText(sel, pageEl),
+        text:    sel.toString().replace(/\s+/g, ' ').trim(),
         page:    pageNum,
         topPct:  Math.max(0, Math.min(100, topPct)),
         leftPct: Math.max(0, Math.min(100, leftPct)),
