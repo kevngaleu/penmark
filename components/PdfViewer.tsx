@@ -174,10 +174,15 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
-      // PDF text items can split words at arbitrary positions (e.g. "roa" + "dmap"
-      // for "roadmap"). If the selection ends just before a continuation fragment,
-      // sel.toString() returns only the partial word. Walk forward through sibling
-      // spans and append any that continue without a whitespace gap.
+      // PDF text items can split a word mid-character (e.g. "roa" + "dmap" for
+      // "roadmap"). If the selection ends just before a continuation fragment,
+      // sel.toString() returns only the partial word.
+      //
+      // Fix: check whether the next sibling span is a ZERO-GAP continuation —
+      // i.e. its CSS left equals the previous span's left+width (same PDF word).
+      // Spans from different words always have a positional gap > 1 CSS px.
+      // This is reliable even when the PDF encodes spacing via positioning rather
+      // than explicit space characters (which would break a whitespace-only check).
       let text = sel.toString()
       if (text && !/\s$/.test(text)) {
         const endNode = range.endContainer
@@ -185,12 +190,21 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           ? endNode.parentElement
           : (endNode instanceof HTMLElement ? endNode : null)
         if (endSpan?.tagName === 'SPAN') {
+          let prevLeft  = parseFloat((endSpan as HTMLElement).style.left)  || 0
+          let prevWidth = parseFloat((endSpan as HTMLElement).style.width) || 0
+
           let next = endSpan.nextElementSibling as HTMLElement | null
           while (next?.tagName === 'SPAN') {
             const nc = next.textContent ?? ''
-            if (!nc || /^\s/.test(nc)) break   // space gap = word boundary, stop
+            if (!nc || /^\s/.test(nc)) break          // explicit space = word end
+
+            const nextLeft = parseFloat(next.style.left) || 0
+            if (nextLeft - (prevLeft + prevWidth) > 1) break  // positional gap = word spacing
+
             text += nc
-            if (/\s/.test(nc[nc.length - 1])) break  // appended chunk ends word
+            prevLeft  = nextLeft
+            prevWidth = parseFloat(next.style.width) || 0
+            if (/\s/.test(nc[nc.length - 1])) break  // appended chunk ends the word
             next = next.nextElementSibling as HTMLElement | null
           }
         }
