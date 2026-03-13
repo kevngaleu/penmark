@@ -37,13 +37,11 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
         container.innerHTML = ''
 
-        // Compute scale to fit container width (max 1.5x)
+        // Scale to fit container width, max 1.5×
         const containerWidth = container.clientWidth - 32
         const firstPage = await pdf.getPage(1)
         const naturalVp = firstPage.getViewport({ scale: 1.0 })
         const scale = Math.min(1.5, containerWidth > 0 ? containerWidth / naturalVp.width : 1.5)
-
-        // Device pixel ratio — doubles canvas resolution on Retina displays
         const dpr = window.devicePixelRatio || 1
 
         for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
@@ -52,24 +50,34 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
 
           const viewport = page.getViewport({ scale })
 
-          // Page wrapper
+          // ── Page wrapper ──────────────────────────────────────────────────
           const pageWrapper = document.createElement('div')
           pageWrapper.className = 'pdf-page'
           pageWrapper.dataset.page = String(pageNum)
           pageWrapper.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 2px 8px rgba(0,0,0,0.12);background:#fff;overflow:hidden;`
 
-          // Canvas with DPR correction for crisp Retina rendering
+          // ── Canvas (crisp DPR rendering) ──────────────────────────────────
           const canvas = document.createElement('canvas')
           canvas.width = Math.round(viewport.width * dpr)
           canvas.height = Math.round(viewport.height * dpr)
           canvas.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;pointer-events:none;z-index:1;`
-
           const ctx = canvas.getContext('2d')!
           ctx.scale(dpr, dpr)
           await page.render({ canvasContext: ctx, viewport }).promise
           if (cancelled) return
 
-          // Text layer — same CSS pixel dimensions as canvas
+          // ── Text overlay ──────────────────────────────────────────────────
+          // We bypass renderTextLayer entirely and position every span ourselves
+          // using the same viewport transform matrix that PDF.js uses for the canvas.
+          // This guarantees spans sit exactly over the canvas glyphs — no CSS
+          // transform-origin hacks, no dependency on renderTextLayer internals.
+          //
+          // viewport.transform = [a, b, c, d, e, f]
+          //   CSS x  =  a·pdfX  +  c·pdfY  +  e
+          //   CSS y  =  b·pdfX  +  d·pdfY  +  f
+          // Standard upright page: [scale, 0, 0, -scale, 0, viewport.height]
+          const [va, vb, vc, vd, ve, vf] = viewport.transform
+
           const textLayerDiv = document.createElement('div')
           textLayerDiv.className = 'textLayer'
           textLayerDiv.style.cssText = `position:absolute;top:0;left:0;width:${viewport.width}px;height:${viewport.height}px;z-index:2;user-select:text;-webkit-user-select:text;`
@@ -77,29 +85,51 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
           const textContent = await page.getTextContent()
           if (cancelled) return
 
-          const rtl = pdfjsLib.renderTextLayer({
-            textContentSource: textContent,
-            container: textLayerDiv,
-            viewport,
-            textDivs: [],
-          })
-          await rtl.promise
-          if (cancelled) return
+          for (const rawItem of textContent.items) {
+            // TextItem has {str, transform, width, height}; TextMarkedContent does not
+            const item = rawItem as { str?: string; transform?: number[]; width?: number; height?: number }
+            if (!item.str || !item.transform || !item.str.trim()) continue
 
-          // CRITICAL: set transform-origin and cursor as INLINE styles after renderTextLayer.
-          // CSS rules can be overridden or mis-ordered; inline styles win unconditionally.
-          // PDF.js applies scaleX(n) starting from the left edge — origin must be 0% 0%
-          // or every span shifts horizontally, misaligning cursor hit areas from canvas text.
-          textLayerDiv.querySelectorAll('span').forEach((el) => {
-            const s = (el as HTMLElement).style
-            s.transformOrigin = '0% 0%'
-            s.cursor = 'text'
-            s.pointerEvents = 'auto'
-            s.userSelect = 'text'
-            s.setProperty('-webkit-user-select', 'text')
-            // Ensure color is transparent — some PDF.js builds set their own color
-            s.color = 'transparent'
-          })
+            // item.transform = text matrix [ta, tb, tc, td, te, tf]
+            // (te, tf) = glyph origin (baseline, left edge) in PDF user space
+            const [ta, tb, , , te, tf] = item.transform
+
+            // Convert origin to CSS viewport coordinates
+            const cssLeft     = va * te + vc * tf + ve
+            const cssBaseline = vb * te + vd * tf + vf
+
+            // Font size in PDF user units → CSS pixels
+            // For standard text matrix the first column magnitude is the font size
+            const fontSizePdf = Math.sqrt(ta * ta + tb * tb)
+            const fontSizeCss = Math.max(fontSizePdf * viewport.scale, 1)
+
+            // Span dimensions in CSS pixels
+            const widthCss  = Math.max((item.width  ?? 0) * viewport.scale, 1)
+            const heightCss = item.height && item.height > 0
+              ? item.height * viewport.scale
+              : fontSizeCss
+
+            // Top edge: baseline is at cssBaseline; text box extends upward by heightCss
+            const topCss = cssBaseline - heightCss
+
+            const span = document.createElement('span')
+            span.textContent = item.str
+            span.style.cssText = [
+              'position:absolute',
+              `left:${cssLeft.toFixed(2)}px`,
+              `top:${topCss.toFixed(2)}px`,
+              `width:${widthCss.toFixed(2)}px`,
+              `height:${heightCss.toFixed(2)}px`,
+              'color:transparent',
+              'white-space:pre',
+              'cursor:text',
+              'user-select:text',
+              'pointer-events:auto',
+              'line-height:1',
+            ].join(';')
+            span.style.setProperty('-webkit-user-select', 'text')
+            textLayerDiv.appendChild(span)
+          }
 
           pageWrapper.appendChild(canvas)
           pageWrapper.appendChild(textLayerDiv)
@@ -117,19 +147,18 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
     return () => { cancelled = true }
   }, [pdfUrl])
 
-  // Text selection handler
+  // ── Selection handler ───────────────────────────────────────────────────
   useEffect(() => {
     if (!loaded) return
 
-    // PM-015: collect spans that overlap the selection, sort by reading order, join.
-    //
-    // Key improvement: use range.getClientRects() (per-line rects) instead of
-    // getBoundingClientRect() (a single union rect). The union rect for a
-    // multi-line selection can span several lines, accidentally pulling in spans
-    // the user never touched. Per-line rects are tight and accurate.
+    // Collect every span whose bounding rect overlaps ANY of the selection's
+    // per-line rects, sort into reading order, join with spaces.
+    // Uses getClientRects() (one tight rect per line) rather than
+    // getBoundingClientRect() (one big union rect) to avoid pulling in spans
+    // from rows the user never touched.
     function captureCleanText(sel: Selection, pageEl: HTMLElement): string {
       if (sel.rangeCount === 0) return sel.toString().trim()
-      const range = sel.getRangeAt(0)
+      const range    = sel.getRangeAt(0)
       const selRects = Array.from(range.getClientRects())
       if (selRects.length === 0) return sel.toString().trim()
 
@@ -142,24 +171,24 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
         const r = span.getBoundingClientRect()
         if (r.width === 0) continue
 
-        // Span must overlap at least one of the selection's per-line rects
         const overlaps = selRects.some(sr =>
-          !(r.right < sr.left - 4 || r.left > sr.right + 4 ||
-            r.bottom < sr.top - 4 || r.top > sr.bottom + 4)
+          !(r.right  < sr.left   - 4 ||
+            r.left   > sr.right  + 4 ||
+            r.bottom < sr.top    - 4 ||
+            r.top    > sr.bottom + 4)
         )
         if (overlaps) collected.push({ text, rect: r })
       }
 
       if (collected.length === 0) return sel.toString().trim()
 
-      // Sort reading order: top-to-bottom, then left-to-right within each row
+      // Reading order: top → bottom, then left → right within each row
       collected.sort((a, b) => {
         const rowDiff = Math.round(a.rect.top) - Math.round(b.rect.top)
         if (Math.abs(rowDiff) > 5) return rowDiff
         return a.rect.left - b.rect.left
       })
 
-      // Join spans; add space at row breaks or visible horizontal gaps
       let result = ''
       let prev: DOMRect | null = null
       for (const { text, rect } of collected) {
@@ -177,32 +206,29 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || !sel.toString().trim()) return
 
-      const range = sel.getRangeAt(0)
+      const range     = sel.getRangeAt(0)
       const container = containerRef.current
       if (!container) return
 
       let pageEl: HTMLElement | null = null
       let node: Node | null = range.commonAncestorContainer
       while (node && node !== container) {
-        if (node instanceof HTMLElement && node.dataset.page) {
-          pageEl = node
-          break
-        }
+        if (node instanceof HTMLElement && node.dataset.page) { pageEl = node; break }
         node = node.parentNode
       }
       if (!pageEl) return
 
-      const pageNum = parseInt(pageEl.dataset.page!)
+      const pageNum  = parseInt(pageEl.dataset.page!)
       const pageRect = pageEl.getBoundingClientRect()
       const rangeRect = range.getBoundingClientRect()
 
-      const topPct = ((rangeRect.top - pageRect.top) / pageRect.height) * 100
-      const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width) * 100
+      const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
+      const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
       onSelection({
-        text: captureCleanText(sel, pageEl),
-        page: pageNum,
-        topPct: Math.max(0, Math.min(100, topPct)),
+        text:    captureCleanText(sel, pageEl),
+        page:    pageNum,
+        topPct:  Math.max(0, Math.min(100, topPct)),
         leftPct: Math.max(0, Math.min(100, leftPct)),
       })
     }
@@ -232,8 +258,8 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
             key={marker.id}
             className="absolute z-10 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs flex items-center justify-center font-bold shadow pointer-events-none"
             style={{
-              top: pageEl.offsetTop + (marker.topPct / 100) * pageEl.offsetHeight - 12,
-              left: pageEl.offsetLeft + (marker.leftPct / 100) * pageEl.offsetWidth - 12,
+              top:  pageEl.offsetTop  + (marker.topPct  / 100) * pageEl.offsetHeight - 12,
+              left: pageEl.offsetLeft + (marker.leftPct / 100) * pageEl.offsetWidth  - 12,
             }}
           >
             {marker.num ?? '•'}
@@ -242,19 +268,8 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
       })}
 
       <style>{`
-        .textLayer { opacity: 1; }
-        .textLayer span {
-          color: transparent;
-          position: absolute;
-          white-space: pre;
-          cursor: text;
-          user-select: text;
-          -webkit-user-select: text;
-          pointer-events: auto;
-          transform-origin: 0% 0%;
-        }
-        .textLayer ::selection {
-          background: rgba(99, 102, 241, 0.3);
+        .textLayer span::selection {
+          background: rgba(99, 102, 241, 0.35);
           color: transparent;
         }
       `}</style>
