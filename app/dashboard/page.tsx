@@ -414,10 +414,31 @@ export default function DashboardPage() {
                   {currentComments.map((c, i) => {
                     const visibleIndex = allVisible.indexOf(c)
                     const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                    if (isBlurred) return null
                     return (
-                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} onEdit={isBlurred ? undefined : editComment} blurred={isBlurred} />
+                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} onEdit={editComment} />
                     )
                   })}
+                  {/* Single lock card — replaces all individual blurred cards */}
+                  {blurredCount > 0 && (
+                    <div className="bg-white border-2 border-dashed border-amber-200 rounded-2xl overflow-hidden">
+                      <div className="bg-gradient-to-b from-amber-50/60 to-white px-5 py-6 text-center">
+                        <div className="text-2xl mb-2">🔒</div>
+                        <p className="text-sm font-semibold text-gray-900 mb-1">
+                          {blurredCount} more comment{blurredCount !== 1 ? 's' : ''} from your reviewers
+                        </p>
+                        <p className="text-xs text-gray-500 mb-4">
+                          Your reviewers took time to help. Unlock to read everything.
+                        </p>
+                        <button
+                          onClick={() => setShowPaywall(true)}
+                          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold rounded-xl px-6 py-3 transition-colors w-full"
+                        >
+                          Unlock all feedback — $9
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
@@ -440,8 +461,9 @@ export default function DashboardPage() {
                   {generalComments.map(c => {
                     const visibleIndex = allVisible.indexOf(c)
                     const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                    if (isBlurred) return null
                     return (
-                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} onEdit={isBlurred ? undefined : editComment} blurred={isBlurred} />
+                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} onEdit={editComment} />
                     )
                   })}
                 </>
@@ -450,24 +472,6 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Unlock CTA — shown when blurred comments exist */}
-        {blurredCount > 0 && (
-          <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 text-center">
-            <div className="text-2xl mb-2">🔒</div>
-            <p className="text-sm font-semibold text-gray-900 mb-1">
-              {blurredCount} more comment{blurredCount !== 1 ? 's' : ''} from your reviewers
-            </p>
-            <p className="text-xs text-gray-500 mb-4">
-              Your reviewers took time to help — unlock all their feedback.
-            </p>
-            <button
-              onClick={() => setShowPaywall(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl px-6 py-3 transition-colors"
-            >
-              Unlock all feedback — $9
-            </button>
-          </div>
-        )}
 
         {/* "I got the job" banner */}
         {!resume.hired_at && comments.length >= 3 && (
