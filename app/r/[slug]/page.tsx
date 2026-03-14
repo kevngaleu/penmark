@@ -4,8 +4,11 @@ import { useEffect, useState, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
+import { getReviewerId } from '@/lib/reviewer-id'
 import CommentSheet from '@/components/CommentSheet'
-import type { Resume } from '@/types'
+import ReviewerCommentPopover from '@/components/ReviewerCommentPopover'
+import type { Resume, Comment } from '@/types'
+import type { ReviewerComment } from '@/components/PdfViewer'
 
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), { ssr: false })
 
@@ -23,6 +26,9 @@ export default function ReviewPage() {
   const [notFound, setNotFound] = useState(false)
   const [linkClosed, setLinkClosed] = useState(false)
 
+  // Stable reviewer identity (localStorage UUID)
+  const [reviewerUuid] = useState<string>(() => getReviewerId())
+
   // Comment sheet state
   const [sheetOpen, setSheetOpen] = useState(false)
   const [selectedText, setSelectedText] = useState<string | null>(null)
@@ -32,12 +38,16 @@ export default function ReviewPage() {
   const [selLeft, setSelLeft] = useState(0)
   const [promptBody, setPromptBody] = useState<string | undefined>(undefined)
 
-  // Reviewer state
+  // Reviewer's own inline comments (for green highlights)
+  const [reviewerComments, setReviewerComments] = useState<Comment[]>([])
+
+  // Popover state — shows when clicking a green highlight
+  const [popover, setPopover] = useState<{ comment: Comment; anchorRect: DOMRect } | null>(null)
+
+  // Misc state
   const [commentCount, setCommentCount] = useState(0)
   const [showOverlay, setShowOverlay] = useState(false)
   const [fullscreen, setFullscreen] = useState(false)
-
-  // Growth feature state
   const [totalComments, setTotalComments] = useState(0)
   const [momentumMsg, setMomentumMsg] = useState('')
 
@@ -77,6 +87,22 @@ export default function ReviewPage() {
         setTotalComments(comments)
       }
 
+      // Load this reviewer's own inline comments (for highlights + popover)
+      if (reviewerUuid) {
+        const { data: ownComments } = await supabase
+          .from('comments')
+          .select('*')
+          .eq('resume_id', resumeData.id)
+          .eq('reviewer_uuid', reviewerUuid)
+          .is('archived_at_version', null)
+          .not('selected_text', 'is', null)
+
+        if (ownComments && ownComments.length > 0) {
+          setReviewerComments(ownComments)
+          setCommentCount(ownComments.length)
+        }
+      }
+
       await supabase
         .from('resumes')
         .update({ last_active_at: new Date().toISOString() })
@@ -86,7 +112,7 @@ export default function ReviewPage() {
     }
 
     load()
-  }, [slug])
+  }, [slug, reviewerUuid])
 
   const handleSelection = useCallback(({ text, page, topPct, leftPct }: {
     text: string; page: number; topPct: number; leftPct: number
@@ -118,8 +144,9 @@ export default function ReviewPage() {
     if (!resume) return
     const supabase = createClient()
 
-    const { error } = await supabase.from('comments').insert({
+    const { data, error } = await supabase.from('comments').insert({
       resume_id: resume.id,
+      reviewer_uuid: reviewerUuid,
       reviewer_name: reviewerName || null,
       selected_text: isGeneral ? null : selectedText,
       body,
@@ -127,9 +154,14 @@ export default function ReviewPage() {
       top_pct: isGeneral ? 0 : selTop,
       left_pct: isGeneral ? 0 : selLeft,
       is_general: isGeneral,
-    })
+    }).select().single()
 
     if (error) throw new Error(error.message)
+
+    // Add to green highlights if it was an inline comment
+    if (data && !isGeneral && selectedText) {
+      setReviewerComments(prev => [...prev, data])
+    }
 
     const newCount = commentCount + 1
     const newTotal = totalComments + 1
@@ -146,6 +178,40 @@ export default function ReviewPage() {
       }, 500)
     }
   }
+
+  // Called when reviewer clicks a green highlight
+  const handleHighlightClick = useCallback((commentId: string, anchorRect: DOMRect) => {
+    const comment = reviewerComments.find(c => c.id === commentId)
+    if (comment) setPopover({ comment, anchorRect })
+  }, [reviewerComments])
+
+  async function handleEditComment(id: string, newBody: string) {
+    const res = await fetch('/api/edit-comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commentId: id, reviewerUuid, body: newBody }),
+    })
+    if (!res.ok) throw new Error('Failed to edit')
+    setReviewerComments(prev => prev.map(c => c.id === id ? { ...c, body: newBody } : c))
+    setPopover(prev => prev && prev.comment.id === id ? { ...prev, comment: { ...prev.comment, body: newBody } } : prev)
+  }
+
+  async function handleDeleteComment(id: string) {
+    const res = await fetch('/api/delete-comment', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commentId: id, reviewerUuid }),
+    })
+    if (!res.ok) throw new Error('Failed to delete')
+    setReviewerComments(prev => prev.filter(c => c.id !== id))
+    setCommentCount(prev => Math.max(0, prev - 1))
+    setTotalComments(prev => Math.max(0, prev - 1))
+  }
+
+  // Derive the prop PdfViewer expects from the full Comment objects
+  const reviewerHighlights: ReviewerComment[] = reviewerComments
+    .filter(c => c.selected_text)
+    .map(c => ({ id: c.id, selectedText: c.selected_text!, body: c.body }))
 
   if (loading) {
     return (
@@ -238,7 +304,13 @@ export default function ReviewPage() {
           </button>
         )}
         {pdfUrl ? (
-          <PdfViewer pdfUrl={pdfUrl} onSelection={handleSelection} markers={[]} />
+          <PdfViewer
+            pdfUrl={pdfUrl}
+            onSelection={handleSelection}
+            markers={[]}
+            reviewerComments={reviewerHighlights}
+            onHighlightClick={handleHighlightClick}
+          />
         ) : (
           <div className="text-center py-20 text-gray-400 text-sm">Unable to load PDF.</div>
         )}
@@ -261,6 +333,8 @@ export default function ReviewPage() {
               pdfUrl={pdfUrl}
               onSelection={(info) => { setFullscreen(false); handleSelection(info) }}
               markers={[]}
+              reviewerComments={reviewerHighlights}
+              onHighlightClick={handleHighlightClick}
             />
           </div>
         </div>
@@ -290,6 +364,17 @@ export default function ReviewPage() {
           Get your free link →
         </a>
       </div>
+
+      {/* ── Green highlight popover ───────────────────────────────── */}
+      {popover && (
+        <ReviewerCommentPopover
+          comment={popover.comment}
+          anchorRect={popover.anchorRect}
+          onClose={() => setPopover(null)}
+          onEdit={handleEditComment}
+          onDelete={handleDeleteComment}
+        />
+      )}
 
       {/* ── Comment sheet ─────────────────────────────────────────── */}
       <CommentSheet

@@ -23,6 +23,7 @@ export interface ResumeVersion {
 export interface Comment {
   id: string
   resume_id: string
+  reviewer_uuid: string | null
   reviewer_name: string | null
   selected_text: string | null
   body: string

@@ -9,6 +9,12 @@ interface SelectionInfo {
   leftPct: number
 }
 
+export interface ReviewerComment {
+  id: string
+  selectedText: string
+  body: string
+}
+
 interface PdfViewerProps {
   pdfUrl: string
   onSelection: (info: SelectionInfo) => void
@@ -16,6 +22,10 @@ interface PdfViewerProps {
   markers?: Array<{ id: string; page: number; topPct: number; leftPct: number; num?: number }>
   /** Texts that have been commented on — drawn as yellow highlights (job seeker view only) */
   highlightedTexts?: string[]
+  /** Reviewer's own inline comments — drawn as green highlights with click-to-popover */
+  reviewerComments?: ReviewerComment[]
+  /** Called when reviewer clicks one of their own highlights */
+  onHighlightClick?: (commentId: string, anchorRect: DOMRect) => void
 }
 
 /**
@@ -49,10 +59,20 @@ interface MergedTextItem {
   fontSizePdf: number
 }
 
-export default function PdfViewer({ pdfUrl, onSelection, markers = [], highlightedTexts = [] }: PdfViewerProps) {
+export default function PdfViewer({
+  pdfUrl,
+  onSelection,
+  markers = [],
+  highlightedTexts = [],
+  reviewerComments = [],
+  onHighlightClick,
+}: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
+  // Keep a stable ref to the callback so the click-listener effect doesn't re-run
+  const onHighlightClickRef = useRef(onHighlightClick)
+  useEffect(() => { onHighlightClickRef.current = onHighlightClick }, [onHighlightClick])
 
   useEffect(() => {
     let cancelled = false
@@ -325,6 +345,61 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [], highlight
       document.removeEventListener('touchend', handleTouchEnd)
     }
   }, [loaded, onSelection])
+
+  // -- Reviewer green highlights (own comments) --------------------------
+  // Runs whenever the reviewer's comment list changes. Does a DOM pass over
+  // all spans, clears old reviewer highlights, then applies new ones.
+  useEffect(() => {
+    if (!loaded || !containerRef.current) return
+    const container = containerRef.current
+
+    // Clear existing reviewer highlights first
+    container.querySelectorAll<HTMLElement>('[data-reviewer-comment-id]').forEach(el => {
+      el.style.backgroundColor = ''
+      el.style.mixBlendMode    = ''
+      el.style.borderRadius    = ''
+      el.style.cursor          = ''
+      delete el.dataset.reviewerCommentId
+    })
+
+    if (reviewerComments.length === 0) return
+
+    const spans = Array.from(container.querySelectorAll<HTMLElement>('span'))
+    for (const span of spans) {
+      const spanText = (span.textContent ?? '').trim()
+      if (spanText.length < 3) continue
+      for (const rc of reviewerComments) {
+        const clean = rc.selectedText.trim()
+        if (clean.length < 3) continue
+        if (spanText.includes(clean) || clean.includes(spanText)) {
+          span.style.backgroundColor = 'rgba(134, 239, 172, 0.55)'
+          span.style.mixBlendMode    = 'multiply'
+          span.style.borderRadius    = '2px'
+          span.style.cursor          = 'pointer'
+          span.dataset.reviewerCommentId = rc.id
+          break
+        }
+      }
+    }
+  }, [reviewerComments, loaded])
+
+  // -- Click handler for reviewer highlights ----------------------------
+  useEffect(() => {
+    if (!loaded || !containerRef.current) return
+    const container = containerRef.current
+
+    function handleClick(e: MouseEvent) {
+      const target = e.target as HTMLElement
+      const commentId = target.dataset?.reviewerCommentId
+      if (!commentId) return
+      e.stopPropagation()
+      const rect = target.getBoundingClientRect()
+      onHighlightClickRef.current?.(commentId, rect)
+    }
+
+    container.addEventListener('click', handleClick)
+    return () => container.removeEventListener('click', handleClick)
+  }, [loaded])
 
   return (
     <div className="relative">
