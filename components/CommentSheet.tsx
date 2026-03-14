@@ -33,10 +33,13 @@ export default function CommentSheet({ open, selectedText, isGeneral, onSubmit, 
     }
   }, [open, initialBody])
 
-  // Autosave draft
+  // Autosave draft — skip when the body was seeded from a prompt chip so the
+  // prompt text doesn't bleed into the next highlight-triggered sheet open.
   useEffect(() => {
-    if (body) localStorage.setItem('penmark-draft', JSON.stringify({ body, ts: Date.now() }))
-  }, [body])
+    if (body && !initialBody) {
+      localStorage.setItem('penmark-draft', JSON.stringify({ body, ts: Date.now() }))
+    }
+  }, [body, initialBody])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()

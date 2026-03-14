@@ -195,6 +195,12 @@ export default function DashboardPage() {
     setComments(prev => prev.filter(c => c.id !== id))
   }
 
+  async function editComment(id: string, newBody: string) {
+    const supabase = createClient()
+    await supabase.from('comments').update({ body: newBody }).eq('id', id)
+    setComments(prev => prev.map(c => c.id === id ? { ...c, body: newBody } : c))
+  }
+
   function copyLink() {
     if (!resume) return
     navigator.clipboard.writeText(`${window.location.origin}/r/${resume.slug}`)
@@ -376,6 +382,9 @@ export default function DashboardPage() {
                 pdfUrl={pdfUrl}
                 onSelection={() => {}}
                 isOwner
+                highlightedTexts={currentComments
+                  .filter(c => c.selected_text)
+                  .map(c => c.selected_text!)}
                 markers={currentComments.map((c, i) => ({
                   id: c.id,
                   page: c.page_number,
@@ -406,7 +415,7 @@ export default function DashboardPage() {
                     const visibleIndex = allVisible.indexOf(c)
                     const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
                     return (
-                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} blurred={isBlurred} />
+                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} onEdit={isBlurred ? undefined : editComment} blurred={isBlurred} />
                     )
                   })}
                 </>
@@ -432,7 +441,7 @@ export default function DashboardPage() {
                     const visibleIndex = allVisible.indexOf(c)
                     const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
                     return (
-                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} blurred={isBlurred} />
+                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} onEdit={isBlurred ? undefined : editComment} blurred={isBlurred} />
                     )
                   })}
                 </>

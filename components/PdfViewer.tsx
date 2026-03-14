@@ -14,6 +14,8 @@ interface PdfViewerProps {
   onSelection: (info: SelectionInfo) => void
   isOwner?: boolean
   markers?: Array<{ id: string; page: number; topPct: number; leftPct: number; num?: number }>
+  /** Texts that have been commented on — drawn as yellow highlights (job seeker view only) */
+  highlightedTexts?: string[]
 }
 
 /**
@@ -47,7 +49,7 @@ interface MergedTextItem {
   fontSizePdf: number
 }
 
-export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfViewerProps) {
+export default function PdfViewer({ pdfUrl, onSelection, markers = [], highlightedTexts = [] }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
@@ -229,6 +231,27 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [] }: PdfView
             ].join(';')
             span.style.setProperty('-webkit-user-select', 'text')
             textLayerDiv.appendChild(span)
+          }
+
+          // ── Step 4: Yellow highlights for commented text (owner view) ──
+          // Walk every span and mark those whose text overlaps with a commented
+          // selected_text string. Because spans are merged full lines, we use
+          // substring containment in both directions for a reliable match.
+          if (highlightedTexts.length > 0) {
+            const spans = Array.from(textLayerDiv.querySelectorAll('span'))
+            for (const span of spans) {
+              const spanText = (span.textContent ?? '').trim()
+              if (spanText.length < 3) continue
+              const hit = highlightedTexts.some(ht => {
+                const clean = ht.trim()
+                return clean.length > 2 && (spanText.includes(clean) || clean.includes(spanText))
+              })
+              if (hit) {
+                (span as HTMLElement).style.backgroundColor = 'rgba(250, 204, 21, 0.55)';
+                (span as HTMLElement).style.mixBlendMode = 'multiply';
+                (span as HTMLElement).style.borderRadius = '2px'
+              }
+            }
           }
 
           pageWrapper.appendChild(canvas)
