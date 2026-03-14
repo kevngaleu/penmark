@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import FeedbackCard from '@/components/FeedbackCard'
@@ -26,6 +26,8 @@ export default function DashboardPage() {
   const [showArchive, setShowArchive] = useState(false)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const searchParams = useSearchParams()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -110,6 +112,15 @@ export default function DashboardPage() {
     load()
   }, [router])
 
+  // Detect return from Stripe Checkout (?payment=success)
+  useEffect(() => {
+    if (searchParams.get('payment') === 'success') {
+      showToast('🔓 All feedback unlocked!')
+      // Clean up the query param without a full navigation
+      window.history.replaceState({}, '', '/dashboard')
+    }
+  }, [searchParams, showToast])
+
   function interceptReupload(file: File) {
     if (!resume) return
     // Uploads are always free — the paywall gates comment visibility, not versions
@@ -193,16 +204,22 @@ export default function DashboardPage() {
   }
 
   async function unlock() {
-    // V1: manual unlock — Stripe integration in V2
     if (!resume) return
-    const supabase = createClient()
-    await supabase
-      .from('resumes')
-      .update({ is_paid: true })
-      .eq('id', resume.id)
-    setResume({ ...resume, is_paid: true })
-    setShowPaywall(false)
-    showToast('🔓 All feedback unlocked!')
+    setCheckoutLoading(true)
+    try {
+      const res = await fetch('/api/checkout/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resume_id: resume.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Checkout failed')
+      window.location.href = data.url
+    } catch (err) {
+      console.error('Checkout error:', err)
+      showToast('Something went wrong — please try again.')
+      setCheckoutLoading(false)
+    }
   }
 
   if (loading) {
@@ -460,6 +477,7 @@ export default function DashboardPage() {
         open={showPaywall}
         onUnlock={unlock}
         onClose={() => setShowPaywall(false)}
+        loading={checkoutLoading}
       />
       <ArchiveModal
         open={showArchive}

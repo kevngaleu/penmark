@@ -6,9 +6,10 @@ interface PaywallModalProps {
   open: boolean
   onUnlock: () => void
   onClose: () => void
+  loading?: boolean
 }
 
-export default function PaywallModal({ open, onUnlock, onClose }: PaywallModalProps) {
+export default function PaywallModal({ open, onUnlock, onClose, loading = false }: PaywallModalProps) {
   if (!open) return null
 
   return (
@@ -21,16 +22,28 @@ export default function PaywallModal({ open, onUnlock, onClose }: PaywallModalPr
         </p>
         <button
           onClick={onUnlock}
-          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl py-4 text-base transition-colors mb-2"
+          disabled={loading}
+          className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed text-white font-bold rounded-xl py-4 text-base transition-colors mb-2 flex items-center justify-center gap-2"
         >
-          Unlock for ${UNLOCK_PRICE} →
+          {loading ? (
+            <>
+              <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+              </svg>
+              Redirecting to checkout…
+            </>
+          ) : (
+            `Unlock for $${UNLOCK_PRICE} →`
+          )}
         </button>
         <p className="text-xs text-gray-400 mb-4">
           One-time payment · all comments visible forever
         </p>
         <button
           onClick={onClose}
-          className="w-full border border-gray-200 text-gray-500 rounded-xl py-2.5 text-sm hover:bg-gray-50 transition-colors"
+          disabled={loading}
+          className="w-full border border-gray-200 text-gray-500 rounded-xl py-2.5 text-sm hover:bg-gray-50 disabled:opacity-50 transition-colors"
         >
           Not now
         </button>
