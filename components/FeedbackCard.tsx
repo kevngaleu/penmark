@@ -36,12 +36,12 @@ export default function FeedbackCard({ comment, num, onDelete, onEdit, blurred }
           <span className="ml-auto text-xs bg-amber-50 text-amber-600 rounded-full px-2 py-0.5 font-medium">🔒 Locked</span>
         </div>
 
-        <p className="text-sm text-gray-500 leading-relaxed">
-          &ldquo;{previewText(comment.body)}&rdquo;
+        <p className="text-sm text-gray-700 leading-relaxed blur-sm select-none pointer-events-none">
+          {comment.body}
         </p>
 
-        {/* Fade-out overlay at the bottom */}
-        <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
+        {/* Gradient overlay reinforces that content is hidden */}
+        <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-white to-transparent pointer-events-none" />
       </div>
     )
   }
