@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import { createClient } from '@/lib/supabase/client'
 import FeedbackCard from '@/components/FeedbackCard'
@@ -27,7 +27,6 @@ export default function DashboardPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   const [checkoutLoading, setCheckoutLoading] = useState(false)
-  const searchParams = useSearchParams()
   const fileRef = useRef<HTMLInputElement>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -113,13 +112,14 @@ export default function DashboardPage() {
   }, [router])
 
   // Detect return from Stripe Checkout (?payment=success)
+  // Using window.location directly (runs client-side only) to avoid useSearchParams Suspense requirement
   useEffect(() => {
-    if (searchParams.get('payment') === 'success') {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('payment') === 'success') {
       showToast('🔓 All feedback unlocked!')
-      // Clean up the query param without a full navigation
       window.history.replaceState({}, '', '/dashboard')
     }
-  }, [searchParams, showToast])
+  }, [showToast])
 
   function interceptReupload(file: File) {
     if (!resume) return
