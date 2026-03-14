@@ -325,7 +325,7 @@ export default function DashboardPage() {
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Total comments', value: comments.length },
+            { label: 'Total comments', value: allVisible.length },
             { label: 'Reviewers', value: uniqueReviewers },
             { label: 'Pages with feedback', value: pagesWithFeedback },
           ].map(stat => (
