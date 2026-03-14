@@ -268,6 +268,9 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [], highlight
 
     loadPdf()
     return () => { cancelled = true }
+  // highlightedTexts intentionally omitted: adding it would re-render the full
+  // PDF on every comment change. Highlights are correct at initial load time.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfUrl])
 
   // -- Selection handler --------------------------------------------------

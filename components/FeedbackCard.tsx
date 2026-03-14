@@ -12,12 +12,6 @@ interface FeedbackCardProps {
   blurred?: boolean
 }
 
-function previewText(text: string, words = 8): string {
-  const parts = text.trim().split(/\s+/)
-  if (parts.length <= words) return text
-  return parts.slice(0, words).join(' ') + '…'
-}
-
 export default function FeedbackCard({ comment, num, onDelete, onEdit, blurred }: FeedbackCardProps) {
   const [editing, setEditing] = useState(false)
   const [editBody, setEditBody] = useState(comment.body)
