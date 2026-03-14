@@ -8,16 +8,22 @@ interface CommentSheetProps {
   isGeneral: boolean
   onSubmit: (body: string, reviewerName: string) => Promise<void>
   onClose: () => void
+  initialBody?: string
 }
 
-export default function CommentSheet({ open, selectedText, isGeneral, onSubmit, onClose }: CommentSheetProps) {
+export default function CommentSheet({ open, selectedText, isGeneral, onSubmit, onClose, initialBody }: CommentSheetProps) {
   const [body, setBody] = useState('')
   const [reviewerName, setReviewerName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Restore draft from localStorage
+  // When opened with a prompt, seed the body; otherwise restore draft
   useEffect(() => {
+    if (!open) return
+    if (initialBody) {
+      setBody(initialBody)
+      return
+    }
     const draft = localStorage.getItem('penmark-draft')
     if (draft) {
       try {
@@ -25,7 +31,7 @@ export default function CommentSheet({ open, selectedText, isGeneral, onSubmit, 
         if (Date.now() - ts < 30 * 60 * 1000) setBody(savedBody)
       } catch { /* ignore */ }
     }
-  }, [open])
+  }, [open, initialBody])
 
   // Autosave draft
   useEffect(() => {

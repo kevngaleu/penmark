@@ -81,14 +81,14 @@ export default function UploadPage() {
   return (
     <main className="min-h-screen bg-white flex flex-col items-center px-4 py-12">
       <div className="text-sm text-indigo-600 font-medium mb-4 tracking-wide">
-        Like Calendly — but for resume feedback
+        Turn messy resume feedback into clear, actionable comments.
       </div>
 
       <h1 className="text-4xl font-bold text-gray-900 text-center max-w-xl leading-tight mb-3">
         Get real feedback on your resume
       </h1>
       <p className="text-gray-500 text-center max-w-sm mb-8">
-        Upload once. Share your link. Reviewers annotate inline — no sign-up needed.
+        Share one link. Reviewers annotate your resume directly — no sign-up needed.
       </p>
 
       <div className="text-sm text-gray-400 mb-8">

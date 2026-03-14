@@ -330,6 +330,25 @@ export default function DashboardPage() {
           ))}
         </div>
 
+        {/* Feedback visibility summary — shown when there are locked comments */}
+        {blurredCount > 0 && (
+          <div className="bg-white rounded-xl border border-amber-100 shadow-sm px-4 py-3 flex items-center justify-between text-sm">
+            <div className="flex items-center gap-3 text-gray-500 flex-wrap gap-y-1">
+              <span>Feedback received: <strong className="text-gray-900">{allVisible.length}</strong></span>
+              <span className="text-gray-300">·</span>
+              <span>Visible: <strong className="text-gray-900">{FREE_COMMENT_LIMIT}</strong></span>
+              <span className="text-gray-300">·</span>
+              <span>Locked: <strong className="text-amber-600">{blurredCount}</strong></span>
+            </div>
+            <button
+              onClick={() => setShowPaywall(true)}
+              className="text-xs text-indigo-600 font-semibold hover:underline whitespace-nowrap ml-3"
+            >
+              Unlock →
+            </button>
+          </div>
+        )}
+
         {/* PDF preview */}
         {pdfUrl && (
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">

@@ -1,4 +1,4 @@
-export const FREE_COMMENT_LIMIT = 2
+export const FREE_COMMENT_LIMIT = 5
 export const UNLOCK_PRICE = 9
 export const PRO_PRICE = 29
 

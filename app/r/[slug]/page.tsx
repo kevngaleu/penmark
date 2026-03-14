@@ -7,8 +7,13 @@ import { createClient } from '@/lib/supabase/client'
 import CommentSheet from '@/components/CommentSheet'
 import type { Resume } from '@/types'
 
-// PDF.js must be client-side only
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), { ssr: false })
+
+const PROMPTS = [
+  { label: 'What part is confusing?', emoji: '🤔' },
+  { label: 'What part is strongest?', emoji: '💪' },
+  { label: 'What would you remove?',  emoji: '✂️' },
+]
 
 export default function ReviewPage() {
   const { slug } = useParams<{ slug: string }>()
@@ -25,10 +30,16 @@ export default function ReviewPage() {
   const [selPage, setSelPage] = useState(1)
   const [selTop, setSelTop] = useState(0)
   const [selLeft, setSelLeft] = useState(0)
+  const [promptBody, setPromptBody] = useState<string | undefined>(undefined)
 
   // Reviewer state
   const [commentCount, setCommentCount] = useState(0)
   const [showOverlay, setShowOverlay] = useState(false)
+
+  // Growth feature state
+  const [totalComments, setTotalComments] = useState(0)
+  const [totalReviewers, setTotalReviewers] = useState(0)
+  const [momentumMsg, setMomentumMsg] = useState('')
 
   useEffect(() => {
     async function load() {
@@ -54,14 +65,20 @@ export default function ReviewPage() {
         return
       }
 
-      // Get signed URL via server API — anon client cannot access private storage directly
       const urlRes = await fetch(`/api/pdf-url?slug=${slug}`)
       if (urlRes.ok) {
         const { url } = await urlRes.json()
         setPdfUrl(url)
       }
 
-      // Update last_active_at
+      // Fetch public comment + reviewer counts for social proof
+      const countRes = await fetch(`/api/comment-count?slug=${slug}`)
+      if (countRes.ok) {
+        const { comments, reviewers } = await countRes.json()
+        setTotalComments(comments)
+        setTotalReviewers(reviewers)
+      }
+
       await supabase
         .from('resumes')
         .update({ last_active_at: new Date().toISOString() })
@@ -81,8 +98,23 @@ export default function ReviewPage() {
     setSelPage(page)
     setSelTop(topPct)
     setSelLeft(leftPct)
+    setPromptBody(undefined)
     setSheetOpen(true)
   }, [])
+
+  function openPrompt(label: string) {
+    setIsGeneral(true)
+    setSelectedText(null)
+    setPromptBody(label + ': ')
+    setSheetOpen(true)
+  }
+
+  function openGeneral() {
+    setIsGeneral(true)
+    setSelectedText(null)
+    setPromptBody(undefined)
+    setSheetOpen(true)
+  }
 
   async function handleSubmitComment(body: string, reviewerName: string) {
     if (!resume) return
@@ -102,9 +134,15 @@ export default function ReviewPage() {
     if (error) throw new Error(error.message)
 
     const newCount = commentCount + 1
+    const newTotal = totalComments + 1
     setCommentCount(newCount)
+    setTotalComments(newTotal)
 
-    // Show reviewer nudge after first comment
+    // Momentum message — nudge to add another comment
+    setMomentumMsg(`✅ Comment added · This resume now has ${newTotal} comment${newTotal !== 1 ? 's' : ''}. Add another?`)
+    setTimeout(() => setMomentumMsg(''), 6000)
+
+    // Reviewer nudge after first comment
     if (newCount === 1) {
       setTimeout(() => {
         const nudge = document.getElementById('reviewer-nudge')
@@ -152,11 +190,11 @@ export default function ReviewPage() {
         <div className="flex items-center gap-3">
           {commentCount > 0 && (
             <span className="text-xs text-indigo-600 font-medium">
-              {commentCount} comment{commentCount !== 1 ? 's' : ''} from you
+              {commentCount} from you
             </span>
           )}
           <button
-            onClick={() => { setIsGeneral(true); setSelectedText(null); setSheetOpen(true) }}
+            onClick={openGeneral}
             className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-colors"
           >
             + General feedback
@@ -170,13 +208,45 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      {/* Instruction banner */}
-      <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 text-center text-xs text-indigo-700">
-        📝 Highlight any text on the resume to leave an inline comment
+      {/* Social proof + review time bar */}
+      <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 flex items-center justify-between text-xs">
+        <div className="flex items-center gap-3 text-indigo-700">
+          {totalComments > 0 && (
+            <span>👥 {totalReviewers} reviewer{totalReviewers !== 1 ? 's' : ''} · 💬 {totalComments} comment{totalComments !== 1 ? 's' : ''}</span>
+          )}
+          {totalComments === 0 && (
+            <span>📝 Highlight any text on the resume to leave an inline comment</span>
+          )}
+        </div>
+        <span className="text-indigo-500 font-medium">⏱ ~2 min review</span>
+      </div>
+
+      {/* Momentum message */}
+      {momentumMsg && (
+        <div className="bg-green-50 border-b border-green-100 px-4 py-2 text-center text-xs text-green-700 font-medium">
+          {momentumMsg}
+        </div>
+      )}
+
+      {/* Guided feedback prompts */}
+      <div className="max-w-3xl mx-auto px-4 pt-4">
+        <p className="text-xs text-gray-500 font-medium mb-2">Help improve this resume — tap a prompt or highlight text:</p>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {PROMPTS.map(p => (
+            <button
+              key={p.label}
+              onClick={() => openPrompt(p.label)}
+              className="flex items-center gap-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-full px-3 py-1.5 hover:border-indigo-400 hover:text-indigo-700 transition-colors shadow-sm"
+            >
+              <span>{p.emoji}</span>
+              <span>{p.label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* PDF */}
-      <div className="max-w-3xl mx-auto py-6">
+      <div className="max-w-3xl mx-auto px-4 pb-6">
         {pdfUrl ? (
           <PdfViewer
             pdfUrl={pdfUrl}
@@ -208,7 +278,8 @@ export default function ReviewPage() {
         selectedText={selectedText}
         isGeneral={isGeneral}
         onSubmit={handleSubmitComment}
-        onClose={() => { setSheetOpen(false); setSelectedText(null) }}
+        onClose={() => { setSheetOpen(false); setSelectedText(null); setPromptBody(undefined) }}
+        initialBody={promptBody}
       />
 
       {/* Post-review overlay */}
