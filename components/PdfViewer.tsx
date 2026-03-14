@@ -59,9 +59,17 @@ interface MergedTextItem {
   fontSizePdf: number
 }
 
+interface PendingSelection {
+  info: SelectionInfo
+  /** Viewport coords for the toolbar anchor (top-center of selection) */
+  x: number
+  y: number
+}
+
 export default function PdfViewer({
   pdfUrl,
   onSelection,
+  isOwner,
   markers = [],
   highlightedTexts = [],
   reviewerComments = [],
@@ -70,6 +78,8 @@ export default function PdfViewer({
   const containerRef = useRef<HTMLDivElement>(null)
   const [loaded, setLoaded] = useState(false)
   const [error, setError] = useState('')
+  // Pending selection: shown as a floating toolbar instead of opening sheet immediately
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null)
   // Keep a stable ref to the callback so the click-listener effect doesn't re-run
   const onHighlightClickRef = useRef(onHighlightClick)
   useEffect(() => { onHighlightClickRef.current = onHighlightClick }, [onHighlightClick])
@@ -302,7 +312,10 @@ export default function PdfViewer({
 
     function handleMouseUp() {
       const sel = window.getSelection()
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) return
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+        setPendingSelection(null)
+        return
+      }
 
       const range     = sel.getRangeAt(0)
       const container = containerRef.current
@@ -324,13 +337,24 @@ export default function PdfViewer({
       const topPct  = ((rangeRect.top  - pageRect.top)  / pageRect.height) * 100
       const leftPct = ((rangeRect.left - pageRect.left) / pageRect.width)  * 100
 
-      const text = sel.toString()
-
-      onSelection({
-        text:    text.replace(/\s+/g, ' ').trim(),
+      const info: SelectionInfo = {
+        text:    sel.toString().replace(/\s+/g, ' ').trim(),
         page:    pageNum,
         topPct:  Math.max(0, Math.min(100, topPct)),
         leftPct: Math.max(0, Math.min(100, leftPct)),
+      }
+
+      if (isOwner) {
+        // Dashboard / owner view: no commenting, skip toolbar
+        onSelection(info)
+        return
+      }
+
+      // Reviewer: show floating toolbar so user can confirm/adjust before commenting
+      setPendingSelection({
+        info,
+        x: rangeRect.left + rangeRect.width / 2,
+        y: rangeRect.top,
       })
     }
 
@@ -338,13 +362,23 @@ export default function PdfViewer({
     // Give the browser 150 ms to finalise the selection before reading it.
     function handleTouchEnd() { setTimeout(handleMouseUp, 150) }
 
+    // Clear toolbar when a new pointer-down starts (user starts a fresh action)
+    function handlePointerDown(e: PointerEvent) {
+      const toolbar = document.getElementById('penmark-selection-toolbar')
+      if (toolbar && toolbar.contains(e.target as Node)) return // clicked inside toolbar — ignore
+      setPendingSelection(null)
+    }
+
     document.addEventListener('mouseup', handleMouseUp)
     document.addEventListener('touchend', handleTouchEnd)
+    document.addEventListener('pointerdown', handlePointerDown)
     return () => {
       document.removeEventListener('mouseup', handleMouseUp)
       document.removeEventListener('touchend', handleTouchEnd)
+      document.removeEventListener('pointerdown', handlePointerDown)
     }
-  }, [loaded, onSelection])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded, onSelection, isOwner])
 
   // -- Reviewer green highlights (own comments) --------------------------
   // Runs whenever the reviewer's comment list changes. Does a DOM pass over
@@ -430,6 +464,42 @@ export default function PdfViewer({
           </div>
         )
       })}
+
+      {/* Floating "Comment" toolbar — appears after text selection on reviewer page */}
+      {pendingSelection && (() => {
+        const TOOLBAR_W = 120
+        const left = Math.max(8, Math.min(
+          pendingSelection.x - TOOLBAR_W / 2,
+          (typeof window !== 'undefined' ? window.innerWidth : 800) - TOOLBAR_W - 8
+        ))
+        const top = pendingSelection.y > 56
+          ? pendingSelection.y - 48  // above the selection
+          : pendingSelection.y + 24  // flip below if too close to top
+        return (
+          <div
+            id="penmark-selection-toolbar"
+            className="fixed z-50 flex items-center bg-gray-900 text-white rounded-full shadow-xl overflow-hidden"
+            style={{ left, top, width: TOOLBAR_W }}
+          >
+            <button
+              onPointerDown={e => e.preventDefault()} // preserve selection on tap
+              onClick={() => {
+                const info = pendingSelection.info
+                setPendingSelection(null)
+                window.getSelection()?.removeAllRanges()
+                onSelection(info)
+              }}
+              className="flex items-center justify-center gap-1.5 w-full px-4 py-2.5 text-xs font-semibold hover:bg-gray-700 active:bg-gray-600 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              Comment
+            </button>
+          </div>
+        )
+      })()}
 
       <style>{`
         .textLayer span::selection {
