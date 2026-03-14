@@ -3,11 +3,11 @@ import Stripe from 'stripe'
 import { cookies } from 'next/headers'
 import { createServerClient } from '@supabase/ssr'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-})
-
 export async function POST(request: Request) {
+  // Lazy-instantiate so STRIPE_SECRET_KEY is only required at runtime, not build time
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2025-02-24.acacia',
+  })
   try {
     const { resume_id } = await request.json()
     if (!resume_id) {

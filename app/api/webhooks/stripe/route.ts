@@ -2,11 +2,11 @@ import { NextResponse } from 'next/server'
 import Stripe from 'stripe'
 import { createClient } from '@supabase/supabase-js'
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  apiVersion: '2025-02-24.acacia',
-})
-
 export async function POST(request: Request) {
+  // Lazy-instantiate so STRIPE_SECRET_KEY is only required at runtime, not build time
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: '2025-02-24.acacia',
+  })
   const body = await request.text()
   const sig = request.headers.get('stripe-signature')
 
