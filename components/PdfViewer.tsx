@@ -314,8 +314,16 @@ export default function PdfViewer({ pdfUrl, onSelection, markers = [], highlight
       })
     }
 
+    // iOS/Android: touchend fires before mouseup (or instead of it).
+    // Give the browser 150 ms to finalise the selection before reading it.
+    function handleTouchEnd() { setTimeout(handleMouseUp, 150) }
+
     document.addEventListener('mouseup', handleMouseUp)
-    return () => document.removeEventListener('mouseup', handleMouseUp)
+    document.addEventListener('touchend', handleTouchEnd)
+    return () => {
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.removeEventListener('touchend', handleTouchEnd)
+    }
   }, [loaded, onSelection])
 
   return (

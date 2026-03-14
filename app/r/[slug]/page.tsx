@@ -35,10 +35,10 @@ export default function ReviewPage() {
   // Reviewer state
   const [commentCount, setCommentCount] = useState(0)
   const [showOverlay, setShowOverlay] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
   // Growth feature state
   const [totalComments, setTotalComments] = useState(0)
-  const [totalReviewers, setTotalReviewers] = useState(0)
   const [momentumMsg, setMomentumMsg] = useState('')
 
   useEffect(() => {
@@ -71,12 +71,10 @@ export default function ReviewPage() {
         setPdfUrl(url)
       }
 
-      // Fetch public comment + reviewer counts for social proof
       const countRes = await fetch(`/api/comment-count?slug=${slug}`)
       if (countRes.ok) {
-        const { comments, reviewers } = await countRes.json()
+        const { comments } = await countRes.json()
         setTotalComments(comments)
-        setTotalReviewers(reviewers)
       }
 
       await supabase
@@ -138,11 +136,9 @@ export default function ReviewPage() {
     setCommentCount(newCount)
     setTotalComments(newTotal)
 
-    // Momentum message — nudge to add another comment
-    setMomentumMsg(`✅ Comment added · This resume now has ${newTotal} comment${newTotal !== 1 ? 's' : ''}. Add another?`)
-    setTimeout(() => setMomentumMsg(''), 6000)
+    setMomentumMsg(`✅ Added · ${newTotal} comment${newTotal !== 1 ? 's' : ''} total. Add another?`)
+    setTimeout(() => setMomentumMsg(''), 5000)
 
-    // Reviewer nudge after first comment
     if (newCount === 1) {
       setTimeout(() => {
         const nudge = document.getElementById('reviewer-nudge')
@@ -181,62 +177,34 @@ export default function ReviewPage() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Topbar */}
-      <div className="sticky top-0 bg-white border-b border-gray-100 z-30 px-4 py-3 flex items-center justify-between">
-        <div>
-          <span className="font-semibold text-gray-900 text-sm">{resume?.slug}</span>
-          <span className="text-gray-400 text-xs ml-2">· Highlight text to comment</span>
-        </div>
-        <div className="flex items-center gap-3">
+
+      {/* ── Slim topbar ───────────────────────────────────────────── */}
+      <div className="sticky top-0 bg-white border-b border-gray-100 z-30 h-11 px-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-medium text-gray-900 text-sm truncate">{resume?.slug}</span>
           {commentCount > 0 && (
-            <span className="text-xs text-indigo-600 font-medium">
-              {commentCount} from you
+            <span className="text-xs text-indigo-600 shrink-0">
+              · {commentCount} {commentCount === 1 ? 'comment' : 'comments'}
             </span>
           )}
-          <button
-            onClick={openGeneral}
-            className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1.5 rounded-full hover:bg-indigo-700 transition-colors"
-          >
-            + General feedback
-          </button>
-          <button
-            onClick={() => setShowOverlay(true)}
-            className="border border-gray-200 text-gray-700 text-xs font-semibold px-3 py-1.5 rounded-full hover:border-green-500 hover:text-green-600 transition-colors"
-          >
-            ✓ Done
-          </button>
         </div>
+        <button
+          onClick={() => setShowOverlay(true)}
+          className="shrink-0 text-xs font-semibold text-gray-600 border border-gray-200 rounded-full px-3 py-1 hover:border-green-500 hover:text-green-600 transition-colors"
+        >
+          ✓ Done
+        </button>
       </div>
 
-      {/* Social proof + review time bar */}
-      <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 flex items-center justify-between text-xs">
-        <div className="flex items-center gap-3 text-indigo-700">
-          {totalComments > 0 && (
-            <span>👥 {totalReviewers} reviewer{totalReviewers !== 1 ? 's' : ''} · 💬 {totalComments} comment{totalComments !== 1 ? 's' : ''}</span>
-          )}
-          {totalComments === 0 && (
-            <span>📝 Highlight any text on the resume to leave an inline comment</span>
-          )}
-        </div>
-        <span className="text-indigo-500 font-medium">⏱ ~2 min review</span>
-      </div>
-
-      {/* Momentum message */}
-      {momentumMsg && (
-        <div className="bg-green-50 border-b border-green-100 px-4 py-2 text-center text-xs text-green-700 font-medium">
-          {momentumMsg}
-        </div>
-      )}
-
-      {/* Guided feedback prompts */}
-      <div className="max-w-3xl mx-auto px-4 pt-4">
-        <p className="text-xs text-gray-500 font-medium mb-2">Help improve this resume — tap a prompt or highlight text:</p>
-        <div className="flex flex-wrap gap-2 mb-4">
+      {/* ── Prompt chips — single scrollable row ──────────────────── */}
+      <div className="bg-white border-b border-gray-100 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        <div className="flex items-center gap-2 px-4 py-2 w-max">
+          <span className="text-xs text-gray-400 shrink-0">Ask:</span>
           {PROMPTS.map(p => (
             <button
               key={p.label}
               onClick={() => openPrompt(p.label)}
-              className="flex items-center gap-1.5 text-xs bg-white border border-gray-200 text-gray-700 rounded-full px-3 py-1.5 hover:border-indigo-400 hover:text-indigo-700 transition-colors shadow-sm"
+              className="shrink-0 flex items-center gap-1 text-xs bg-gray-50 border border-gray-200 text-gray-600 rounded-full px-3 py-1 hover:border-indigo-400 hover:text-indigo-600 transition-colors whitespace-nowrap"
             >
               <span>{p.emoji}</span>
               <span>{p.label}</span>
@@ -245,34 +213,85 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      {/* PDF */}
-      <div className="max-w-3xl mx-auto px-4 pb-6">
+      {/* ── Momentum toast ────────────────────────────────────────── */}
+      {momentumMsg && (
+        <div className="fixed top-[88px] left-0 right-0 z-40 flex justify-center px-4 pointer-events-none">
+          <div className="bg-gray-900 text-white text-xs font-medium rounded-full px-4 py-2 shadow-lg">
+            {momentumMsg}
+          </div>
+        </div>
+      )}
+
+      {/* ── PDF — fills the screen ────────────────────────────────── */}
+      <div className="relative max-w-3xl mx-auto pb-24">
+        {/* Expand button */}
+        {pdfUrl && (
+          <button
+            onClick={() => setFullscreen(true)}
+            className="absolute top-3 right-5 z-20 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-lg p-1.5 text-gray-500 hover:text-indigo-600 shadow-sm transition-colors"
+            title="Open fullscreen"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+            </svg>
+          </button>
+        )}
         {pdfUrl ? (
-          <PdfViewer
-            pdfUrl={pdfUrl}
-            onSelection={handleSelection}
-            markers={[]}
-          />
+          <PdfViewer pdfUrl={pdfUrl} onSelection={handleSelection} markers={[]} />
         ) : (
           <div className="text-center py-20 text-gray-400 text-sm">Unable to load PDF.</div>
         )}
       </div>
 
-      {/* Reviewer nudge — shown after first comment */}
+      {/* ── Fullscreen PDF modal ──────────────────────────────────── */}
+      {fullscreen && pdfUrl && (
+        <div className="fixed inset-0 z-50 bg-white flex flex-col">
+          <div className="flex items-center justify-between px-4 h-11 border-b border-gray-100 flex-shrink-0">
+            <span className="text-sm font-medium text-gray-700 truncate">{resume?.slug}</span>
+            <button
+              onClick={() => setFullscreen(false)}
+              className="shrink-0 text-xs text-gray-500 border border-gray-200 rounded-full px-3 py-1.5 hover:border-gray-400 transition-colors"
+            >
+              ✕ Close
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto">
+            <PdfViewer
+              pdfUrl={pdfUrl}
+              onSelection={(info) => { setFullscreen(false); handleSelection(info) }}
+              markers={[]}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── FAB — General comment ─────────────────────────────────── */}
+      <button
+        onClick={openGeneral}
+        className="fixed bottom-6 right-4 z-30 flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold rounded-full shadow-lg px-4 py-3 transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" />
+        </svg>
+        General
+      </button>
+
+      {/* ── Reviewer nudge — shown after first comment ────────────── */}
       <div
         id="reviewer-nudge"
-        className="hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 py-3 z-30 items-center justify-between max-w-lg mx-auto"
+        className="hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 px-4 py-3 z-30 items-center justify-between"
       >
         <span className="text-sm text-gray-600">Want feedback on your own resume?</span>
         <a
           href="/"
           className="text-sm text-indigo-600 font-semibold hover:underline whitespace-nowrap ml-3"
         >
-          Create your free resume link in 30 seconds →
+          Get your free link →
         </a>
       </div>
 
-      {/* Comment sheet */}
+      {/* ── Comment sheet ─────────────────────────────────────────── */}
       <CommentSheet
         open={sheetOpen}
         selectedText={selectedText}
@@ -282,7 +301,7 @@ export default function ReviewPage() {
         initialBody={promptBody}
       />
 
-      {/* Post-review overlay */}
+      {/* ── Post-review overlay ───────────────────────────────────── */}
       {showOverlay && (
         <div className="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center px-6 text-center">
           <div className="text-4xl mb-4">🙌</div>
