@@ -8,7 +8,7 @@ import FeedbackCard from '@/components/FeedbackCard'
 import PaywallModal from '@/components/PaywallModal'
 import ArchiveModal from '@/components/ArchiveModal'
 import { FREE_COMMENT_LIMIT } from '@/lib/constants'
-import type { Resume, Comment, ResumeVersion } from '@/types'
+import type { Resume, Comment } from '@/types'
 
 const PdfViewer = dynamic(() => import('@/components/PdfViewer'), { ssr: false })
 
@@ -16,7 +16,6 @@ export default function DashboardPage() {
   const router = useRouter()
   const [resume, setResume] = useState<Resume | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
-  const [versions, setVersions] = useState<ResumeVersion[]>([])
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -97,15 +96,6 @@ export default function DashboardPage() {
         .order('created_at', { ascending: true })
 
       setComments(commentsData || [])
-
-      // Fetch versions
-      const { data: versionsData } = await supabase
-        .from('resume_versions')
-        .select('*')
-        .eq('resume_id', resumeData.id)
-        .order('version_number', { ascending: true })
-
-      setVersions(versionsData || [])
 
       // Get signed URL for current PDF
       const { data: signedData } = await supabase.storage
