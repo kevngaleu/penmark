@@ -27,6 +27,7 @@ export default function DashboardPage() {
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
   const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [activeCommentId, setActiveCommentId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -256,11 +257,143 @@ export default function DashboardPage() {
   const isPaid = resume.is_paid
   const blurredCount = isPaid ? 0 : Math.max(0, allVisible.length - FREE_COMMENT_LIMIT)
 
+  const commentsPanelContent = (
+    <div className="space-y-3">
+      {/* Feedback visibility summary — shown when there are locked comments */}
+      {blurredCount > 0 && (
+        <div className="bg-white rounded-xl border border-amber-100 shadow-sm px-4 py-3 flex items-center justify-between text-sm">
+          <div className="flex items-center gap-3 text-gray-500 flex-wrap gap-y-1">
+            <span>Received: <strong className="text-gray-900">{allVisible.length}</strong></span>
+            <span className="text-gray-300">·</span>
+            <span>Visible: <strong className="text-gray-900">{FREE_COMMENT_LIMIT}</strong></span>
+            <span className="text-gray-300">·</span>
+            <span>Locked: <strong className="text-amber-600">{blurredCount}</strong></span>
+          </div>
+          <button
+            onClick={() => setShowPaywall(true)}
+            className="text-xs text-indigo-600 font-semibold hover:underline whitespace-nowrap ml-3"
+          >
+            Unlock →
+          </button>
+        </div>
+      )}
+
+      {comments.length === 0 ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
+          <div className="text-3xl mb-3">👀</div>
+          <p className="text-gray-500 text-sm">No feedback yet. Share your link to get started.</p>
+        </div>
+      ) : (
+        <>
+          {currentComments.length > 0 && (
+            <>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">
+                Current feedback — {currentComments.length}
+              </h3>
+              {currentComments.map((c, i) => {
+                const visibleIndex = allVisible.indexOf(c)
+                const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                if (isBlurred) return null
+                return (
+                  <FeedbackCard
+                    key={c.id}
+                    comment={c}
+                    num={i + 1}
+                    onDelete={deleteComment}
+                    onEdit={editComment}
+                    onClick={() => setActiveCommentId(c.id)}
+                  />
+                )
+              })}
+              {/* Single lock card */}
+              {blurredCount > 0 && (
+                <div className="bg-white border-2 border-dashed border-amber-200 rounded-2xl overflow-hidden">
+                  <div className="bg-gradient-to-b from-amber-50/60 to-white px-5 py-6 text-center">
+                    <div className="text-2xl mb-2">🔒</div>
+                    <p className="text-sm font-semibold text-gray-900 mb-1">
+                      {blurredCount} more comment{blurredCount !== 1 ? 's' : ''} from your reviewers
+                    </p>
+                    <p className="text-xs text-gray-500 mb-4">
+                      Your reviewers took time to help. Unlock to read everything.
+                    </p>
+                    <button
+                      onClick={() => setShowPaywall(true)}
+                      className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold rounded-xl px-6 py-3 transition-colors w-full"
+                    >
+                      Unlock all feedback — $9
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {Object.keys(archivedByVersion).sort((a, b) => Number(b) - Number(a)).map(ver => (
+            <div key={ver}>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 mt-4 mb-2">
+                Version {ver} feedback — archived
+              </h3>
+              {archivedByVersion[Number(ver)].map(c => (
+                <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} />
+              ))}
+            </div>
+          ))}
+
+          {generalComments.length > 0 && (
+            <>
+              <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 mt-4 mb-2">
+                General feedback — {generalComments.length}
+              </h3>
+              {generalComments.map(c => {
+                const visibleIndex = allVisible.indexOf(c)
+                const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
+                if (isBlurred) return null
+                return (
+                  <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} onEdit={editComment} />
+                )
+              })}
+            </>
+          )}
+        </>
+      )}
+
+      {/* "I got the job" banner */}
+      {!resume.hired_at && comments.length >= 3 && (
+        <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center">
+          <div className="text-2xl mb-2">🎉</div>
+          <p className="text-sm font-medium text-green-800 mb-3">Got the job? Let us know!</p>
+          <button
+            onClick={async () => {
+              const supabase = createClient()
+              await supabase
+                .from('resumes')
+                .update({ hired_at: new Date().toISOString() })
+                .eq('id', resume.id)
+              setResume({ ...resume, hired_at: new Date().toISOString() })
+              showToast('🏆 Congratulations! Your outcome has been saved.')
+            }}
+            className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-6 py-2.5 transition-colors"
+          >
+            I got the job! 🏆
+          </button>
+        </div>
+      )}
+
+      {resume.hired_at && (
+        <div className="bg-green-600 rounded-2xl p-5 text-center text-white">
+          <div className="text-3xl mb-2">🏆</div>
+          <p className="font-bold text-lg">You got the job!</p>
+          <p className="text-green-100 text-sm mt-1">Congratulations — this resume did its job.</p>
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-100 px-4 py-4">
-        <div className="max-w-2xl mx-auto flex items-center justify-between">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
           <h1 className="font-bold text-gray-900">Penmark</h1>
           <button
             onClick={async () => {
@@ -275,10 +408,10 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 py-6 space-y-6">
+      <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
         {/* Share link card */}
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 max-w-2xl">
           <div className="flex items-center justify-between mb-3">
             <h2 className="font-semibold text-gray-900 text-sm">Your review link</h2>
             <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
@@ -323,7 +456,7 @@ export default function DashboardPage() {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3 max-w-2xl">
           {[
             { label: 'Total comments', value: allVisible.length },
             { label: 'Reviewers', value: uniqueReviewers },
@@ -336,52 +469,35 @@ export default function DashboardPage() {
           ))}
         </div>
 
-        {/* Feedback visibility summary — shown when there are locked comments */}
-        {blurredCount > 0 && (
-          <div className="bg-white rounded-xl border border-amber-100 shadow-sm px-4 py-3 flex items-center justify-between text-sm">
-            <div className="flex items-center gap-3 text-gray-500 flex-wrap gap-y-1">
-              <span>Feedback received: <strong className="text-gray-900">{allVisible.length}</strong></span>
-              <span className="text-gray-300">·</span>
-              <span>Visible: <strong className="text-gray-900">{FREE_COMMENT_LIMIT}</strong></span>
-              <span className="text-gray-300">·</span>
-              <span>Locked: <strong className="text-amber-600">{blurredCount}</strong></span>
-            </div>
-            <button
-              onClick={() => setShowPaywall(true)}
-              className="text-xs text-indigo-600 font-semibold hover:underline whitespace-nowrap ml-3"
-            >
-              Unlock →
-            </button>
-          </div>
-        )}
-
-        {/* PDF preview */}
-        {pdfUrl && (
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
-              <span className="text-sm font-medium text-gray-700">
-                Version {resume.current_version}
-              </span>
-              <label className="text-xs text-indigo-600 font-semibold cursor-pointer hover:text-indigo-700">
-                Upload new version
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={e => {
-                    const f = e.target.files?.[0]
-                    if (f) interceptReupload(f)
-                    e.target.value = ''
-                  }}
-                />
-              </label>
-            </div>
-            <div className="max-h-96 overflow-y-auto">
+        {/* Two-panel split: PDF left, comments right on desktop; stacked on mobile */}
+        {pdfUrl ? (
+          <div className="grid grid-cols-1 md:grid-cols-[3fr_2fr] gap-6 items-start">
+            {/* Left: PDF — sticky on desktop, scrolls independently */}
+            <div className="pdf-scroll-panel bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden md:sticky md:top-6 md:max-h-[calc(100vh-48px)] md:overflow-y-auto">
+              <div className="px-4 py-3 border-b border-gray-50 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">
+                  Version {resume.current_version}
+                </span>
+                <label className="text-xs text-indigo-600 font-semibold cursor-pointer hover:text-indigo-700">
+                  Upload new version
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="application/pdf"
+                    className="hidden"
+                    onChange={e => {
+                      const f = e.target.files?.[0]
+                      if (f) interceptReupload(f)
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+              </div>
               <PdfViewer
                 pdfUrl={pdfUrl}
                 onSelection={() => {}}
                 isOwner
+                activeMarkerId={activeCommentId ?? undefined}
                 highlightedTexts={currentComments
                   .filter(c => c.selected_text)
                   .map(c => c.selected_text!)}
@@ -394,113 +510,13 @@ export default function DashboardPage() {
                 }))}
               />
             </div>
+
+            {/* Right: comments panel */}
+            {commentsPanelContent}
           </div>
-        )}
-
-        {/* Feedback list */}
-        <div className="space-y-3">
-          {comments.length === 0 ? (
-            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 text-center">
-              <div className="text-3xl mb-3">👀</div>
-              <p className="text-gray-500 text-sm">No feedback yet. Share your link to get started.</p>
-            </div>
-          ) : (
-            <>
-              {currentComments.length > 0 && (
-                <>
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1">
-                    Current feedback — {currentComments.length}
-                  </h3>
-                  {currentComments.map((c, i) => {
-                    const visibleIndex = allVisible.indexOf(c)
-                    const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
-                    if (isBlurred) return null
-                    return (
-                      <FeedbackCard key={c.id} comment={c} num={i + 1} onDelete={deleteComment} onEdit={editComment} />
-                    )
-                  })}
-                  {/* Single lock card — replaces all individual blurred cards */}
-                  {blurredCount > 0 && (
-                    <div className="bg-white border-2 border-dashed border-amber-200 rounded-2xl overflow-hidden">
-                      <div className="bg-gradient-to-b from-amber-50/60 to-white px-5 py-6 text-center">
-                        <div className="text-2xl mb-2">🔒</div>
-                        <p className="text-sm font-semibold text-gray-900 mb-1">
-                          {blurredCount} more comment{blurredCount !== 1 ? 's' : ''} from your reviewers
-                        </p>
-                        <p className="text-xs text-gray-500 mb-4">
-                          Your reviewers took time to help. Unlock to read everything.
-                        </p>
-                        <button
-                          onClick={() => setShowPaywall(true)}
-                          className="bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white text-sm font-semibold rounded-xl px-6 py-3 transition-colors w-full"
-                        >
-                          Unlock all feedback — $9
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              )}
-
-              {Object.keys(archivedByVersion).sort((a, b) => Number(b) - Number(a)).map(ver => (
-                <div key={ver}>
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 mt-4 mb-2">
-                    Version {ver} feedback — archived
-                  </h3>
-                  {archivedByVersion[Number(ver)].map(c => (
-                    <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} />
-                  ))}
-                </div>
-              ))}
-
-              {generalComments.length > 0 && (
-                <>
-                  <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide px-1 mt-4 mb-2">
-                    General feedback — {generalComments.length}
-                  </h3>
-                  {generalComments.map(c => {
-                    const visibleIndex = allVisible.indexOf(c)
-                    const isBlurred = !isPaid && visibleIndex >= FREE_COMMENT_LIMIT
-                    if (isBlurred) return null
-                    return (
-                      <FeedbackCard key={c.id} comment={c} onDelete={deleteComment} onEdit={editComment} />
-                    )
-                  })}
-                </>
-              )}
-            </>
-          )}
-        </div>
-
-
-        {/* "I got the job" banner */}
-        {!resume.hired_at && comments.length >= 3 && (
-          <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center">
-            <div className="text-2xl mb-2">🎉</div>
-            <p className="text-sm font-medium text-green-800 mb-3">Got the job? Let us know!</p>
-            <button
-              onClick={async () => {
-                const supabase = createClient()
-                await supabase
-                  .from('resumes')
-                  .update({ hired_at: new Date().toISOString() })
-                  .eq('id', resume.id)
-                setResume({ ...resume, hired_at: new Date().toISOString() })
-                showToast('🏆 Congratulations! Your outcome has been saved.')
-              }}
-              className="bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-xl px-6 py-2.5 transition-colors"
-            >
-              I got the job! 🏆
-            </button>
-          </div>
-        )}
-
-        {resume.hired_at && (
-          <div className="bg-green-600 rounded-2xl p-5 text-center text-white">
-            <div className="text-3xl mb-2">🏆</div>
-            <p className="font-bold text-lg">You got the job!</p>
-            <p className="text-green-100 text-sm mt-1">Congratulations — this resume did its job.</p>
-          </div>
+        ) : (
+          /* No PDF — full-width comments */
+          <div className="max-w-2xl">{commentsPanelContent}</div>
         )}
       </div>
 

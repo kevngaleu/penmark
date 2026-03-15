@@ -10,9 +10,10 @@ interface FeedbackCardProps {
   onDelete?: (id: string) => void
   onEdit?: (id: string, body: string) => Promise<void>
   blurred?: boolean
+  onClick?: () => void
 }
 
-export default function FeedbackCard({ comment, num, onDelete, onEdit, blurred }: FeedbackCardProps) {
+export default function FeedbackCard({ comment, num, onDelete, onEdit, blurred, onClick }: FeedbackCardProps) {
   const [editing, setEditing] = useState(false)
   const [editBody, setEditBody] = useState(comment.body)
   const [editLoading, setEditLoading] = useState(false)
@@ -41,7 +42,10 @@ export default function FeedbackCard({ comment, num, onDelete, onEdit, blurred }
   }
 
   return (
-    <div className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm">
+    <div
+      className="bg-white border border-gray-100 rounded-xl p-4 shadow-sm transition-colors hover:border-indigo-200 cursor-pointer"
+      onClick={onClick}
+    >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="flex items-center gap-2">
           {num != null && (

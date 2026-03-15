@@ -26,6 +26,8 @@ interface PdfViewerProps {
   reviewerComments?: ReviewerComment[]
   /** Called when reviewer clicks one of their own highlights */
   onHighlightClick?: (commentId: string, anchorRect: DOMRect) => void
+  /** When set, scrolls the .pdf-scroll-panel ancestor to show the corresponding marker */
+  activeMarkerId?: string
 }
 
 /**
@@ -74,6 +76,7 @@ export default function PdfViewer({
   highlightedTexts = [],
   reviewerComments = [],
   onHighlightClick,
+  activeMarkerId,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [loaded, setLoaded] = useState(false)
@@ -83,6 +86,20 @@ export default function PdfViewer({
   // Keep a stable ref to the callback so the click-listener effect doesn't re-run
   const onHighlightClickRef = useRef(onHighlightClick)
   useEffect(() => { onHighlightClickRef.current = onHighlightClick }, [onHighlightClick])
+
+  // Scroll the sticky .pdf-scroll-panel to show the active marker when a FeedbackCard is clicked
+  useEffect(() => {
+    if (!activeMarkerId || !loaded || !containerRef.current) return
+    const marker = markers.find(m => m.id === activeMarkerId)
+    if (!marker) return
+    const pageEl = containerRef.current.querySelector(`[data-page="${marker.page}"]`) as HTMLElement | null
+    if (!pageEl) return
+    const scrollPanel = containerRef.current.closest('.pdf-scroll-panel') as HTMLElement | null
+    if (!scrollPanel) return
+    const target = pageEl.offsetTop + (marker.topPct / 100) * pageEl.offsetHeight - 80
+    scrollPanel.scrollTo({ top: Math.max(0, target), behavior: 'smooth' })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMarkerId])
 
   useEffect(() => {
     let cancelled = false
