@@ -81,10 +81,10 @@ export default function UploadPage() {
   return (
     <main className="min-h-screen bg-white flex flex-col items-center px-4 py-12">
       <h1 className="text-4xl font-bold text-gray-900 text-center max-w-xl leading-tight mb-3">
-        Turn messy resume feedback into clear, actionable comments — in one place.
+        Feedback, finally in context.
       </h1>
       <p className="text-gray-500 text-center max-w-sm mb-8">
-        Share one link. Reviewers annotate your resume directly — no sign-up needed.
+        No more feedback scattered across DMs, email, and voice notes. Every comment, pinned to the right line.
       </p>
 
       <div className="text-sm text-gray-400 mb-8">
